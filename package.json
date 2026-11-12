@@ -1,0 +1,21 @@
+{
+  "name": "maozhiku-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "贸智库 · 企业 AI 服务交付平台（本地服务版）",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "mammoth": "^1.8.0",
+    "pdfjs-dist": "^4.8.69",
+    "xlsx": "^0.18.5"
+  }
+}

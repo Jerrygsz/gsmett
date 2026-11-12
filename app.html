@@ -122,6 +122,21 @@
 </div>
 
 <script src="assets/js/data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/live.js"></script>
 <script src="assets/js/app.js"></script>
+<script>
+  /* 本地服务可用就切到真实数据，否则保持演示模式 */
+  (async () => {
+    try {
+      const ok = await LIVE.boot();
+      document.documentElement.dataset.mode = ok ? 'live' : 'demo';
+      if (ok && window.__appRefresh) window.__appRefresh();
+    } catch (e) {
+      console.warn('[live] 启动失败，保持演示模式', e);
+      document.documentElement.dataset.mode = 'demo';
+    }
+  })();
+</script>
 </body>
 </html>

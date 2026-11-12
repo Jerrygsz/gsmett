@@ -130,8 +130,26 @@ const TM = (() => {
     const close = () => back.remove();
     back.querySelector('[data-modal-cancel]').onclick = close;
     back.addEventListener('click', e => { if (e.target === back) close(); });
-    back.querySelector('[data-modal-ok]').onclick = () => {
-      const keep = onOk && onOk(back);
+    const okBtn = back.querySelector('[data-modal-ok]');
+    okBtn.onclick = async () => {
+      if (!onOk) return close();
+      // 支持异步：返回 Promise 时等结果，false 就保持弹窗打开
+      let keep;
+      try {
+        keep = onOk(back);
+        if (keep && typeof keep.then === 'function') {
+          okBtn.disabled = true;
+          const label = okBtn.textContent;
+          okBtn.textContent = '处理中…';
+          keep = await keep;
+          okBtn.disabled = false;
+          okBtn.textContent = label;
+        }
+      } catch (e) {
+        okBtn.disabled = false;
+        toast(e.message || '操作失败', 'warn');
+        keep = false;
+      }
       if (keep !== false) close();
     };
     return { close, root: back };
@@ -248,12 +266,12 @@ const TM = (() => {
     },
     {
       id: 2, title: '电脑及环境检查', role: '本地工具检查', owner: '系统自检', minutes: 3,
-      what: '检查准备运行知识库的那台电脑。浏览器能读到的信息（系统、处理器、内存、网络）当场实测；硬盘空间、Docker 安装情况这些浏览器读不到，需要你确认或由本地助手检测。',
-      why: '知识库引擎需要一台长期开机的电脑。硬盘不足或网络不通，会在导入资料那一步失败，提前检查比事后排查省事得多。',
+      what: '检查准备运行知识库的那台电脑：操作系统、处理器、内存、系统盘空间、端口占用。点一下就开始读，读出来的都是这台机器的真实情况。',
+      why: '知识库引擎需要一台长期开机的电脑。硬盘不足或内存太小，会在导入资料那一步失败，提前检查比事后排查省事得多。',
       howto: [
         '确认这台电脑会长期开机（建议放在办公室，不要用笔记本电脑）。',
-        '点下面的「开始检查」，浏览器会读取它能拿到的系统信息——这些是本机真实数据。',
-        '硬盘空间和 Docker 需要你打开资源管理器 / 开始菜单确认，或安装本地助手自动检测。',
+        '点下面的「开始检查」，本地服务会直接读取系统信息，约 3 秒。',
+        '哪项标黄就按提示处理，处理完点「重新检查」即可。',
       ],
       exec: {
         label: '开始环境检查',
@@ -261,9 +279,9 @@ const TM = (() => {
         logs: [],
       },
       checks: [
-        { id: 'c1', label: '本机环境满足运行要求', meta: '浏览器实测 · 点上方检查自动核验' },
-        { id: 'c2', label: '系统盘可用空间 ≥ 40 GB', meta: '需你打开资源管理器确认' },
-        { id: 'c3', label: 'Docker Desktop 已安装并运行', meta: '需本地助手检测或人工确认' },
+        { id: 'c1', label: '系统与硬件满足运行要求', meta: '操作系统 / 处理器 / 内存 · 本地服务实测' },
+        { id: 'c2', label: '系统盘可用空间 ≥ 5 GB', meta: '轻量引擎约需 5 GB（含资料与索引）' },
+        { id: 'c3', label: '资料存储目录可写', meta: '本地服务已创建 data 目录' },
       ],
       status: 'done',
     },
@@ -292,7 +310,7 @@ const TM = (() => {
       },
       checks: [
         { id: 'c1', label: '已上传核心产品资料', meta: '产品目录 / 规格表' },
-        { id: 'c2', label: '已上传销售流程资料', meta: 'SOP / FAQ' },
+        { id: 'c2', label: '至少覆盖两类资料', meta: '只有产品资料，销售和售后问题会答不上来' },
         { id: 'c3', label: '每份资料已标注分类', meta: '用于回答时显示出处' },
       ],
       status: 'done',

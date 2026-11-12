@@ -1,0 +1,255 @@
+/**
+ * 真实模式适配层
+ *
+ * 作用：本地服务可用时，把服务端数据映射成现有 UI 使用的结构，
+ * 让 app.js 的渲染逻辑一行不用改，只把"写"的路径换成真实接口。
+ */
+(function () {
+  const LIVE = {
+    on: false,
+    clientId: null,
+    client: null,
+    docs: [],
+    kb: null,
+    llm: null,
+    tests: null,
+    env: null,
+
+    /* ---------------- 启动 ---------------- */
+
+    async boot() {
+      const ok = await API.detect();
+      if (!ok) {
+        console.info('[live] 本地服务不可用，使用演示数据');
+        return false;
+      }
+
+      // 客户来源：URL ?c= → localStorage → 第一个客户
+      const qs = new URLSearchParams(location.search);
+      let cid = qs.get('c') || API.clientId;
+      if (!cid) {
+        const list = await API.clients();
+        cid = list.clients?.[0]?.id || null;
+      }
+      if (!cid) {
+        console.info('[live] 还没有客户，先去后台建一个');
+        return false;
+      }
+
+      API.setClient(cid);
+      this.clientId = cid;
+
+      const r = await API.client(cid);
+      this.client = r.client;
+      this.on = true;
+
+      await this.reload();
+      this.paint();
+      return true;
+    },
+
+    /* 拉取全部真实数据 */
+    async reload() {
+      const id = this.clientId;
+      const [stateR, docsR, kbR, llmR, testsR] = await Promise.all([
+        API.state(id),
+        API.docs(id),
+        API.kbStats(id),
+        API.llm(id),
+        API.getTests(id),
+      ]);
+
+      this.serverState = stateR.state || {};
+      this.docs = docsR.docs || [];
+      this.kb = kbR || {};
+      this.llm = llmR || { configured: false };
+      this.tests = testsR || { items: [] };
+    },
+
+    /* 把服务端状态合并进 TM.state，供现有 UI 渲染 */
+    paint() {
+      const S = TM.state;
+      const srv = this.serverState || {};
+
+      if (srv.org) Object.assign(S.org, srv.org);
+      if (srv.members) S.members = srv.members;
+      if (srv.project) {
+        Object.assign(S.project, {
+          id: srv.project.id || S.project.id,
+          name: srv.project.name || S.project.name,
+          createdAt: srv.project.createdAt || S.project.createdAt,
+          owner: srv.project.owner || S.project.owner,
+          steps: srv.project.steps || {},
+          env: srv.project.env || null,
+          report: srv.project.testRun?.report || srv.project.report || null,
+        });
+      }
+      S.portalAsks = srv.portalAsks || 0;
+      S.portalMiss = srv.portalMiss || 0;
+      S.activity = srv.activity || [];
+
+      // 资料：服务端 docs → 现有 files 结构
+      S.project.files = this.docs.map((d) => ({
+        id: d.id,
+        name: d.name,
+        ext: (d.ext || '').toUpperCase().slice(0, 4),
+        cat: d.cat || guessCat(d.name),
+        bytes: d.size,
+        size: d.sizeText,
+        pages: d.pages,
+        chars: d.chars,
+        slices: 0,
+        state: d.status === 'empty' ? 'ocr' : 'ok',
+        scanned: d.scanned,
+      }));
+
+      // 测试题：服务端结果 → 现有 TEST_QUESTIONS 结构
+      this.paintTests();
+
+      TM.save();
+    },
+
+    paintTests() {
+      const items = this.tests?.items || [];
+      const results = this.tests?.results || [];
+      const byId = Object.fromEntries(results.map((r) => [r.id, r]));
+
+      if (!items.length) return;
+
+      const mapped = items.map((t, i) => {
+        const r = byId[t.id];
+        const cite = r?.citations?.[0];
+        return {
+          id: i + 1,
+          rid: t.id,
+          cat: r ? (r.gap ? '资料不足' : '业务知识') : '待运行',
+          key: !!t.key,
+          q: t.q,
+          a: r?.answer || (r ? '（没有生成回答）' : ''),
+          cite: cite ? `${cite.doc}${cite.page ? ' · P.' + cite.page : ''}` : '—',
+          r: r?.verdict === 'pass' ? 'pass' : r?.verdict === 'fix' ? 'fix' : r?.verdict === 'gap' ? 'gap' : 'pass',
+        };
+      });
+
+      const Q = TM.TEST_QUESTIONS;
+      Q.length = 0;
+      mapped.forEach((m) => Q.push(m));
+
+      if (results.length) {
+        const marks = {};
+        results.forEach((r, i) => {
+          if (['pass', 'fix', 'gap'].includes(r.verdict)) marks[i + 1] = r.verdict;
+        });
+        TM.state.project.testRun = {
+          generated: true,
+          ran: true,
+          at: (this.tests.ranAt || '').slice(0, 16).replace('T', ' '),
+          marks,
+        };
+      } else if (items.length) {
+        TM.state.project.testRun = { generated: true, ran: false, at: null, marks: {} };
+      }
+    },
+
+    /* 把本地勾选/进度同步到服务端（防抖） */
+    syncSoon() {
+      if (!this.on) return;
+      clearTimeout(this._t);
+      this._t = setTimeout(() => {
+        const S = TM.state;
+        API.saveState(this.clientId, {
+          org: S.org,
+          members: S.members,
+          activity: S.activity,
+          portalAsks: S.portalAsks,
+          portalMiss: S.portalMiss,
+          project: {
+            steps: S.project.steps,
+            env: S.project.env || null,
+          },
+        }).catch(() => { });
+      }, 600);
+    },
+
+    /* ---------------- 环境检测 ---------------- */
+
+    async probeEnv() {
+      const e = await API.env();
+      this.env = e;
+      return e;
+    },
+
+    /* ---------------- 资料 ---------------- */
+
+    async upload(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return { added: [], failed: [] };
+      const r = await API.upload(this.clientId, files);
+      if (r.error) throw new Error(r.error);
+      this.docs = (await API.docs(this.clientId)).docs || [];
+      return r;
+    },
+
+    async removeDoc(docId) {
+      await API.deleteDoc(this.clientId, docId);
+      this.docs = (await API.docs(this.clientId)).docs || [];
+      return this.docs;
+    },
+
+    /* ---------------- 知识库 ---------------- */
+
+    async buildKb() {
+      const r = await API.buildKb(this.clientId);
+      if (r.error) throw new Error(r.error);
+      this.kb = r;
+      return r;
+    },
+
+    /* ---------------- 模型 ---------------- */
+
+    async saveLlm(cfg) {
+      const r = await API.saveLlm(this.clientId, cfg);
+      if (r.ok) this.llm = { configured: true, ...r.config };
+      return r;
+    },
+
+    /* ---------------- 测试 ---------------- */
+
+    async genTests(count = 12) {
+      const r = await API.genTests(this.clientId, count);
+      if (r.error) throw new Error(r.error);
+      this.tests = { items: r.tests || [], results: null };
+      return r;
+    },
+
+    async runTests() {
+      const r = await API.runTests(this.clientId);
+      if (r.error) throw new Error(r.error);
+      this.tests = { ...this.tests, results: r.results, ranAt: r.ranAt };
+      return r;
+    },
+
+    async mark(rowIndex, verdict) {
+      const q = TM.TEST_QUESTIONS[rowIndex - 1];
+      if (!q?.rid) return;
+      return API.markTest(this.clientId, q.rid, verdict);
+    },
+
+    /* ---------------- 问答 ---------------- */
+
+    async ask(question) {
+      return API.chat(this.clientId, question);
+    },
+  };
+
+  /* 和服务端同一套归类规则 */
+  function guessCat(name) {
+    const n = name || '';
+    if (/售后|退换|保修|维修|投诉/.test(n)) return '售后资料';
+    if (/SOP|流程|规范|制度/.test(n)) return '业务流程';
+    if (/FAQ|常见问题|话术|销售|报价/.test(n)) return '销售资料';
+    return '产品资料';
+  }
+
+  window.LIVE = LIVE;
+})();

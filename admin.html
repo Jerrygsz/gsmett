@@ -255,6 +255,7 @@
 </div>
 
 <script src="assets/js/data.js"></script>
+<script src="assets/js/api.js"></script>
 <script>
 (function () {
   const { qi, qa, icon, esc, toast, modal, loadAdmin, saveAdmin, createClient, enterClient,
@@ -273,12 +274,32 @@
   const healthDot = (h) => h === 'good' ? 'var(--success)' : h === 'warn' ? 'var(--warn)' : 'var(--danger)';
   const money = (s) => parseInt(String(s || '0').replace(/[^\d]/g, ''), 10) || 0;
 
-  function showApp() {
+  /* 把服务端客户列表同步到本地，原有渲染逻辑不用改 */
+  async function syncFromServer() {
+    if (!(await API.detect())) return false;
+    const r = await API.clients();
+    if (r.error) throw new Error(r.error);
+    const a = loadAdmin();
+    a.clients = (r.clients || []).map(c => ({
+      ...c,
+      stage: c.stage || '待启动',
+      pct: c.pct || 0,
+      amount: c.amount || '¥18,800',
+      due: c.due || '—',
+      health: c.health || 'good',
+      note: c.note || '',
+    }));
+    saveAdmin(a);
+    return true;
+  }
+
+  async function showApp() {
     qi('#adLogin').style.display = 'none';
     qi('#adApp').style.display = '';
     qi('#adName').textContent = ADMIN_ACCOUNT.name;
     qi('#adAvatar').textContent = ADMIN_ACCOUNT.name.slice(0, 1);
     try {
+      await syncFromServer();
       renderAll();
     } catch (err) {
       // 本地存了旧版本的后台数据时，渲染可能失败。不要让人卡在空白页。
@@ -511,8 +532,7 @@
       okText: '进入工作空间',
       cancelText: '取消',
       onOk: () => {
-        enterClient(id);
-        location.href = 'app.html';
+        location.href = 'app.html?c=' + id;
       },
     });
   }
@@ -540,7 +560,7 @@
         </div>`,
       okText: '进入工作空间',
       cancelText: '关闭',
-      onOk: () => { enterClient(id); location.href = 'app.html'; },
+      onOk: () => { location.href = 'app.html?c=' + id; },
     });
   }
 
@@ -578,7 +598,7 @@
           <textarea class="textarea" id="ncNote" placeholder="资料现状、团队情况、特殊要求"></textarea></div>`,
       okText: '创建客户',
       cancelText: '取消',
-      onOk: (back) => {
+      onOk: async (back) => {
         const org = back.querySelector('#ncOrg').value.trim();
         const contact = back.querySelector('#ncContact').value.trim();
         const email = back.querySelector('#ncEmail').value.trim();
@@ -590,7 +610,8 @@
         const dup = (loadAdmin().clients || []).find(c => c.org === org);
         if (dup) { toast('这个企业已经在客户列表里了', 'warn'); return false; }
 
-        const client = createClient({
+        // 真实建客户：写入服务端，同时生成空白工作空间
+        const r = await API.createClient({
           org, contact,
           phone: back.querySelector('#ncPhone').value,
           email,
@@ -598,11 +619,12 @@
           size: back.querySelector('#ncSize').value,
           city: back.querySelector('#ncCity').value,
           svc: back.querySelector('#ncSvc').value,
-          amount: back.querySelector('#ncAmount').value,
           owner: back.querySelector('#ncOwner').value,
-          note: back.querySelector('#ncNote').value,
         });
+        if (r.error) { toast('创建失败：' + r.error, 'warn'); return false; }
+        const client = r.client;
 
+        await syncFromServer();
         renderAll();
         toast(`已创建客户，项目编号 ${client.pid}`);
 
@@ -613,7 +635,7 @@
             body: `<div class="note note--brand">${icon('checkCircle')}<span>空白工作空间已生成，企业信息、资料、成员都是空的，从第 1 步开始。现在进去就能以该客户的身份走一遍。</span></div>`,
             okText: '现在进入',
             cancelText: '稍后',
-            onOk: () => { enterClient(client.id); location.href = 'app.html'; },
+            onOk: () => { location.href = 'app.html?c=' + client.id; },
           });
         }, 320);
       },

@@ -571,8 +571,8 @@
                   <b>${esc(step.exec.label)}</b>
                   <span>${esc(step.exec.desc)}</span>
                 </div>
-                <button class="btn btn--ghost btn--sm" id="btnExec" ${st === 'done' || saved.executed || st === 'locked' ? 'disabled' : ''}>
-                  ${saved.executed ? icon('check') + ' 已执行' : icon('play') + ' 开始执行'}
+                <button class="btn btn--ghost btn--sm" id="btnExec" ${st === 'locked' ? 'disabled' : ''}>
+                  ${saved.executed ? icon('refresh') + ' 重新执行' : icon('play') + ' 开始执行'}
                 </button>
               </div>
               <div class="console" id="console" style="display:${saved.executed ? 'block' : 'none'}">
@@ -583,6 +583,12 @@
           </div>` : ''}
 
           ${step.id === 2 ? envBlock(step, st, saved) : ''}
+
+          ${step.id === 5 ? `
+          <div class="step-block">
+            <div class="step-block__label">模型配置</div>
+            ${st === 'locked' ? `<div class="note note--warn">${icon('lock')}<span>完成前面的步骤后才能配置模型。</span></div>` : llmForm(true)}
+          </div>` : ''}
 
           <div class="step-block">
             <div class="step-block__label" id="gateLabel">完成检查 · ${checkedCount}/${checkTotal}</div>
@@ -676,7 +682,10 @@
 
     // 执行
     const be = qi('#btnExec');
-    if (be) be.onclick = () => (step.id === 2 ? runEnvCheck(step, be) : runExec(step, be));
+    if (be) be.onclick = () => {
+      if (step.id === 2) return (window.LIVE && window.LIVE.on) ? runEnvCheckLive(step, be) : runEnvCheck(step, be);
+      return runExec(step, be);
+    };
 
     // 完成
     const bd = qi('#btnDone');
@@ -693,6 +702,8 @@
     if (step.id === 3) bindDocManager(step);
     // 第 7 步：测试工作台
     if (step.id === 7) bindTestBench(step);
+    // 第 5 步：模型配置
+    if (step.id === 5) bindLlmForm();
     // 第 8 步：员工邀请与反馈
     if (step.id === 8) bindInviteBox(step);
   }
@@ -830,7 +841,104 @@
     </div>`;
   }
 
+  /* ---------------- live 模式：环境检查用本地服务的真实数据 ---------------- */
+
+  function envBlockLive(step, st, saved) {
+    const env = S.project.env;
+    const locked = st === 'locked';
+    const done = !!env;
+
+    const rows = done ? [
+      { label: '操作系统', value: `${env.os} · ${env.arch}`, state: 'ok', need: 'Windows 10 以上' },
+      { label: '处理器', value: `${env.cpu.model} · ${env.cpu.cores} 核`, state: env.verdict.cpuOk ? 'ok' : 'warn', need: '建议 4 核以上' },
+      { label: '内存', value: `${env.memory.totalGB} GB（当前可用 ${env.memory.freeGB} GB）`, state: env.verdict.memOk ? 'ok' : 'warn', need: '建议 8 GB 以上' },
+      { label: '系统盘', value: `${env.diskAvailGB} GB 可用 / 共 ${env.disks[0]?.totalGB || '?'} GB`, state: env.verdict.diskOk ? 'ok' : 'warn', need: '需 ≥ 5 GB' },
+      { label: 'Docker', value: env.runtime.docker ? `已安装 ${env.runtime.docker}` : '未安装（本项目不需要）', state: 'info', need: '可选' },
+      { label: '端口 3000', value: env.verdict.port3000Free ? '空闲' : '被其他程序占用', state: env.verdict.port3000Free ? 'ok' : 'warn', need: '需空闲' },
+      { label: '运行环境', value: `Node ${env.runtime.node}`, state: 'ok', need: '服务端' },
+    ] : [];
+
+    const warnN = rows.filter(r => r.state === 'warn').length;
+
+    return `<div class="step-block">
+      <div class="step-block__label">环境检查</div>
+      <div class="exec-box">
+        <div class="exec-box__top">
+          <span class="exec-box__ico">${icon('monitor')}</span>
+          <div style="flex:1">
+            <b>检查这台电脑</b>
+            <span>${done ? `检测于 ${env.at.slice(11, 16)} · 由本地服务直接读取` : '由本地服务读取系统信息，约 3 秒'}</span>
+          </div>
+          <button class="btn btn--ghost btn--sm" id="btnExec" ${locked ? 'disabled' : ''}>
+            ${done ? icon('refresh') + ' 重新检查' : icon('play') + ' 开始检查'}
+          </button>
+        </div>
+
+        <div class="env-group">
+          <div class="env-group__head">
+            <b>本机实测</b>
+            <span>${done ? '7 项 · 真实数据' : '7 项 · 点击上方开始检查'}</span>
+          </div>
+          ${done ? rows.map(r => `<div class="env-row is-live">
+            <span class="env-row__dot" style="color:${r.state === 'warn' ? 'var(--warn)' : r.state === 'info' ? 'var(--brand)' : 'var(--success)'};background:${r.state === 'warn' ? 'var(--warn-bg)' : r.state === 'info' ? 'var(--brand-50)' : 'var(--success-bg)'}">
+              ${r.state === 'warn' ? icon('alert') : r.state === 'info' ? icon('info') : icon('check')}
+            </span>
+            <span class="env-row__k">${esc(r.label)}</span>
+            <span class="env-row__v">${esc(r.value)}</span>
+            <span class="env-row__need">${esc(r.need)}</span>
+          </div>`).join('') : `<div class="env-row"><span class="env-row__dot" style="color:var(--text-4);background:var(--surface-3)">${icon('minus')}</span><span class="env-row__k">待检测</span><span class="env-row__v" style="color:var(--text-4)">—</span><span class="env-row__need"></span></div>`}
+        </div>
+
+        ${done ? `<div class="env-summary ${warnN ? 'is-warn' : 'is-ok'}">
+          ${icon(warnN ? 'alert' : 'checkCircle')}
+          <div>
+            <b>${warnN ? `${warnN} 项不满足要求` : '这台电脑满足运行要求'}</b>
+            <span>${warnN ? '按上面标黄的项目处理后再继续。' : `系统、处理器、内存、磁盘均达标。资料会存在 ${esc(env.host)} 的 data 目录里。`}</span>
+          </div>
+        </div>` : ''}
+
+        <div class="note note--info mt12">${icon('shield')}<span><b>这些数字是怎么来的：</b>本地服务运行在这台电脑上，直接读系统的磁盘、内存、已安装软件和端口状态——网页做不到的事，由它代劳。所有读取都在本机完成，不上传任何系统信息。</span></div>
+      </div>
+    </div>`;
+  }
+
+  async function runEnvCheckLive(step, btn) {
+    if (TM.stepStatus(step.id) === 'locked') {
+      toast('先完成上一步再检查', 'warn');
+      return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = icon('refresh') + ' 正在读取…';
+    try {
+      const env = await window.LIVE.probeEnv();
+      S.project.env = env;
+      TM.save();
+      window.LIVE.syncSoon();
+
+      const saved = TM.stepState(step.id);
+      saved.executed = true;
+      const v = env.verdict;
+      setCheck(step, 'c1', v.diskOk && v.memOk && v.cpuOk);
+      setCheck(step, 'c2', v.diskOk);
+      setCheck(step, 'c3', true);
+      TM.save();
+      refreshGate(step, saved);
+
+      logAct('环境检查完成 · ' + (v.diskOk && v.memOk && v.cpuOk ? '满足要求' : '有不满足项'), '系统');
+      renderStepPanel();
+
+      const bad = !v.diskOk || !v.memOk || !v.cpuOk;
+      toast(bad ? '检查完成，有项目不满足要求' : '检查完成：这台电脑满足运行要求', bad ? 'warn' : 'success');
+    } catch (e) {
+      btn.disabled = false;
+      btn.innerHTML = icon('play') + ' 开始检查';
+      toast('检测失败：' + e.message, 'warn');
+    }
+  }
+
   function envBlock(step, st, saved) {
+    if (window.LIVE && window.LIVE.on) return envBlockLive(step, st, saved);
+
     const env = S.project.env;
     const locked = st === 'locked';
     const done = !!env;
@@ -1006,6 +1114,8 @@
 
   /* 模拟自动执行 */
   async function runExec(step, btn) {
+    if (window.LIVE && window.LIVE.on && step.id === 4) return runBuildKb(step, btn);
+
     const con = qi('#console');
     btn.disabled = true;
     btn.innerHTML = icon('refresh') + ' 执行中…';
@@ -1258,10 +1368,27 @@
       refreshGate(step, TM.stepState(step.id));
     });
 
-    qa('[data-del]').forEach(btn => btn.onclick = () => {
+    qa('[data-del]').forEach(btn => btn.onclick = async () => {
       const id = btn.dataset.del;
       const f = (S.project.files || []).find(x => x.id === id);
       if (!f) return;
+
+      if (window.LIVE && window.LIVE.on) {
+        btn.disabled = true;
+        try {
+          await window.LIVE.removeDoc(id);
+          window.LIVE.paint();
+          TM.save();
+          const revertedL = syncDocChecks(step);
+          if (revertedL) { toast('资料变更，第 3 步需要重新确认', 'warn'); router(); }
+          else { renderStepPanel(); toast(`已移除 ${f.name}`, 'info'); }
+        } catch (e) {
+          btn.disabled = false;
+          toast('删除失败：' + e.message, 'warn');
+        }
+        return;
+      }
+
       S.project.files = S.project.files.filter(x => x.id !== id);
       TM.save();
       const reverted = syncDocChecks(step);
@@ -1275,8 +1402,47 @@
     });
   }
 
-  function addFiles(list, step) {
+  async function addFiles(list, step) {
     if (!list || !list.length) return;
+
+    /* 本地服务可用：真的上传、真的解析 */
+    if (window.LIVE && window.LIVE.on) {
+      const dz = qi('#dropzone');
+      const names = Array.from(list).map(f => f.name);
+      if (dz) {
+        dz.classList.add('is-busy');
+        dz.innerHTML = `<span class="dropzone__ico">${icon('refresh')}</span>
+          <b>正在上传并解析 ${names.length} 份资料…</b>
+          <span class="dropzone__hint">PDF 解析需要一点时间，页面不要关</span>`;
+      }
+      try {
+        const r = await window.LIVE.upload(list);
+        const okN = (r.added || []).length;
+        const failed = r.failed || [];
+
+        window.LIVE.paint();
+        TM.save();
+        syncDocChecks(step);
+        renderStepPanel();
+
+        if (okN) {
+          const chars = (r.added || []).reduce((a, x) => a + (x.chars || 0), 0);
+          logAct(`上传 ${okN} 份资料，解析出 ${chars.toLocaleString('en-US')} 字`);
+          toast(`已解析 ${okN} 份资料 · ${chars.toLocaleString('en-US')} 字${failed.length ? ` · ${failed.length} 份失败` : ''}`);
+          const scanned = (r.added || []).filter(x => x.scanned);
+          if (scanned.length) toast(`${scanned[0].name} 是扫描件，读不出文字，需要先转成文字版`, 'warn');
+          const empty = (r.added || []).filter(x => x.empty && !x.scanned);
+          if (empty.length) toast(`${empty[0].name} 里几乎没有文字`, 'warn');
+        }
+        if (failed.length) toast(`${failed[0].name}：${failed[0].reason}`, 'warn');
+        if (!okN && !failed.length) toast('没有文件被接受', 'warn');
+      } catch (e) {
+        renderStepPanel();
+        toast('上传失败：' + e.message, 'warn');
+      }
+      return;
+    }
+
     const files = S.project.files || (S.project.files = []);
     let added = 0, skipped = 0, tooBig = 0, dup = 0;
 
@@ -1320,9 +1486,10 @@
     const files = S.project.files || [];
     const has = c => files.some(f => f.cat === c);
     let reverted = false;
+    const cats = new Set(files.map(f => f.cat).filter(Boolean));
     if (setCheck(step, 'c1', has('产品资料'))) reverted = true;
-    if (setCheck(step, 'c2', has('业务流程') || has('销售资料'))) reverted = true;
-    if (setCheck(step, 'c3', files.length > 0)) reverted = true;
+    if (setCheck(step, 'c2', cats.size >= 2)) reverted = true;
+    if (setCheck(step, 'c3', files.length > 0 && files.every(f => !!f.cat))) reverted = true;
     return reverted;
   }
 
@@ -1379,6 +1546,16 @@
     const Q = TM.TEST_QUESTIONS;
 
     if (!run.generated) {
+      if (window.LIVE && window.LIVE.on) {
+        const n = (S.project.files || []).length;
+        return `<div class="test-empty">
+          <span class="test-empty__ico">${icon('target')}</span>
+          <b>还没有生成测试题</b>
+          <p>模型会读你的 ${n} 份资料出 12 道题，每道题的答案都必须能在资料里找到。生成后先批量运行，再由你抽检关键题。</p>
+          <button class="btn btn--primary" id="btnGenTest">${icon('zap')} 根据资料生成测试题</button>
+          <span class="fs11 muted mt8">你在第 5 步配置的模型会逐题回答，错的地方就是资料要补的地方</span>
+        </div>`;
+      }
       return `<div class="test-empty">
         <span class="test-empty__ico">${icon('target')}</span>
         <b>还没有生成测试题</b>
@@ -1438,6 +1615,115 @@
     `;
   }
 
+  /* 真实测试台：出题、运行、判定全部走服务端 */
+  function bindLiveTestBench(step) {
+    const bg = qi('#btnGenTest');
+    if (bg) bg.onclick = async () => {
+      bg.disabled = true;
+      bg.innerHTML = icon('refresh') + ' 模型正在读资料出题…';
+      try {
+        const r = await window.LIVE.genTests(12);
+        window.LIVE.paintTests();
+        TM.save();
+        renderStepPanel();
+        toast(`已根据资料生成 ${(r.tests || []).length} 道题`);
+        logAct(`生成 ${(r.tests || []).length} 道测试题`, '系统');
+      } catch (e) {
+        bg.disabled = false;
+        bg.innerHTML = icon('zap') + ' 根据资料生成测试题';
+        toast(e.message, 'warn');
+      }
+    };
+
+    qa('[data-filter]').forEach(c => c.onclick = () => {
+      testFilter = c.dataset.filter;
+      renderStepPanel();
+    });
+
+    const br = qi('#btnRunBatch') || qi('#btnRerunBatch');
+    if (br) br.onclick = async () => {
+      const total = TM.TEST_QUESTIONS.length;
+      const barBox = qi('#testRunBarBox'), bar = qi('#testRunBar'), pct = qi('#testRunPct');
+      br.disabled = true;
+      br.innerHTML = icon('refresh') + ' 正在逐题跑…';
+      if (barBox) barBox.style.display = '';
+      if (pct) pct.style.display = '';
+
+      // 真实进度要靠流式接口，这里按每题的典型耗时推进，跑完再校准
+      let shown = 0;
+      const timer = setInterval(() => {
+        shown = Math.min(total - 1, shown + 1);
+        if (bar) bar.style.width = Math.round((shown / total) * 100) + '%';
+        if (pct) pct.textContent = `${shown} / ${total}`;
+      }, 1200);
+
+      try {
+        const r = await window.LIVE.runTests();
+        clearInterval(timer);
+        if (bar) bar.style.width = '100%';
+        if (pct) pct.textContent = `${total} / ${total}`;
+        window.LIVE.paintTests();
+        TM.save();
+        renderStepPanel();
+
+        const res = r.results || [];
+        const gapN = res.filter(x => x.verdict === 'gap').length;
+        const errN = res.filter(x => x.verdict === 'error').length;
+        toast(`${total} 题跑完${gapN ? ` · ${gapN} 题资料不足` : ''}${errN ? ` · ${errN} 题出错` : ''}`);
+        logAct(`运行 ${total} 道测试题`, '系统');
+        syncTestChecks(step);
+      } catch (e) {
+        clearInterval(timer);
+        br.disabled = false;
+        br.innerHTML = icon('play') + ' 批量运行';
+        toast('运行失败：' + e.message, 'warn');
+      }
+    };
+
+    qa('[data-mark]').forEach(b => b.onclick = () => {
+      const qid = +b.dataset.qid;
+      const mark = b.dataset.mark;
+      const run = S.project.testRun;
+      const next = run.marks[qid] === mark ? null : mark;
+      if (next) run.marks[qid] = next; else delete run.marks[qid];
+      TM.save();
+
+      const row = qi(`.tq[data-q="${qid}"]`);
+      const eff = run.marks[qid] || TM.TEST_QUESTIONS[qid - 1]?.r || 'pass';
+      if (row) {
+        qa('.mark-btn', row).forEach(x => x.classList.toggle('is-on', x.dataset.mark === run.marks[qid]));
+        const badge = qi('[data-qbadge]', row);
+        if (badge) {
+          badge.className = 'badge ' + (eff === 'pass' ? 'badge--success' : eff === 'fix' ? 'badge--warn' : 'badge--danger');
+          badge.textContent = eff === 'pass' ? '通过' : eff === 'fix' ? '需修改' : '资料不足';
+        }
+      }
+
+      if (window.LIVE && window.LIVE.mark) {
+        window.LIVE.mark(qid, next).catch(() => { });
+      }
+
+      const wrap = qi('#testStatsWrap');
+      if (wrap) wrap.innerHTML = testStatsHTML();
+      refreshTestFoot(step);
+      syncTestChecks(step);
+    });
+
+    const bm = qi('#btnMakeReport');
+    if (bm) bm.onclick = () => {
+      const st = testStats();
+      S.project.report = {
+        at: TM.fmtDate(new Date()),
+        rate: st.rate, pass: st.pass, fix: st.fix, gap: st.gap,
+        keyDone: st.keyDone,
+      };
+      TM.save();
+      logAct(`生成测试报告，通过率 ${st.rate}%`, '系统');
+      toast(`测试报告已生成 · 通过率 ${st.rate}%`);
+      renderStepPanel();
+    };
+  }
+
   function testRow(q, run, marks) {
     const m = marks[q.id] || (run.ran ? q.r : '');
     const isKey = q.key;
@@ -1469,6 +1755,8 @@
   }
 
   function bindTestBench(step) {
+    if (window.LIVE && window.LIVE.on) return bindLiveTestBench(step);
+
     const Q = TM.TEST_QUESTIONS;
 
     const bg = qi('#btnGenTest');
@@ -1827,6 +2115,188 @@
     const renderers = { model: cfgModel, api: cfgApi, kb: cfgKb, docs: cfgDocs, assistant: cfgAssistant, prompt: cfgPrompt };
     body.innerHTML = renderers[tab]();
     bindCfg(body, tab);
+  }
+
+  /* =====================================================================
+     真实能力：建库 / 模型配置（本地服务可用时走这里）
+     ===================================================================== */
+
+  /* 第 4 步：真的解析资料、真的建索引 */
+  async function runBuildKb(step, btn) {
+    const con = qi('#console');
+    const saved = TM.stepState(step.id);
+    btn.disabled = true;
+    btn.innerHTML = icon('refresh') + ' 正在建库…';
+    con.style.display = 'block';
+    con.innerHTML = '';
+
+    const say = (text, cls = 'ok') => {
+      const line = TM.el('div', '', `<span class="ts">${TM.fmtTime(new Date())}</span><span class="${cls}">${esc(text)}</span>`);
+      line.style.opacity = '0';
+      line.style.transition = 'opacity .2s';
+      con.appendChild(line);
+      requestAnimationFrame(() => { line.style.opacity = '1'; });
+      con.scrollTop = con.scrollHeight;
+    };
+
+    try {
+      say('读取资料并重新解析…');
+      const r = await window.LIVE.buildKb();
+
+      for (const d of r.perDoc || []) {
+        say(`${d.name} · ${d.pages} 页 · ${d.chunks} 个切片`);
+        await sleep(120);
+      }
+      say(`切片完成 · 共 ${r.chunks} 个片段`);
+      await sleep(150);
+      say(`索引构建完成 · ${r.terms} 个词项`);
+      await sleep(150);
+      say(`耗时 ${r.ms} ms · 知识库已就绪`, 'dim');
+
+      saved.executed = true;
+      TM.save();
+      window.LIVE.syncSoon();
+      logAct(`知识库构建完成 · ${r.chunks} 个切片 / ${r.terms} 个词项`, '系统');
+      toast(`建库完成 · ${r.chunks} 个切片`);
+
+      btn.disabled = false;
+      btn.innerHTML = icon('check') + ' 已执行';
+
+      const first = step.checks[0];
+      if (first && !saved.checks.includes(first.id)) {
+        saved.checks.push(first.id);
+        TM.save();
+        refreshGate(step, saved);
+      }
+      window.LIVE.kb = r;
+    } catch (e) {
+      say(e.message, 'warn');
+      btn.disabled = false;
+      btn.innerHTML = icon('play') + ' 开始执行';
+      toast('建库失败：' + e.message, 'warn');
+    }
+  }
+
+  /* 模型配置表单：第 5 步和配置中心共用 */
+  function llmForm(compact) {
+    const cfg = (window.LIVE && window.LIVE.llm) || { configured: false };
+    const providers = [
+      ['deepseek', 'DeepSeek', 'deepseek-chat'],
+      ['dashscope', '通义千问', 'qwen-plus'],
+      ['zhipu', '智谱 GLM', 'glm-4-plus'],
+      ['moonshot', '月之暗面', 'moonshot-v1-8k'],
+      ['openai', 'OpenAI', 'gpt-4o-mini'],
+      ['custom', '自定义（OpenAI 兼容）', ''],
+    ];
+
+    return `<div class="card" style="padding:16px;background:var(--surface-2);box-shadow:none">
+      ${cfg.configured ? `
+        <div class="row--between mb12">
+          <div class="row" style="gap:8px">
+            <span style="color:var(--success);display:flex">${icon('checkCircle')}</span>
+            <div>
+              <b class="fs12">已配置：${esc(cfg.model)}</b>
+              <div class="fs11 muted mt2">密钥 ${esc(cfg.keyMasked)} · 存在本机，不上传</div>
+            </div>
+          </div>
+          <button class="btn btn--quiet btn--sm" id="btnLlmEdit">${icon('edit')} 修改</button>
+        </div>` : `
+        <div class="note note--warn mb12">${icon('key')}<span>还没有配置模型。没有模型，第 7 步出不了测试题，员工门户也只能返回原文片段、给不出回答。</span></div>`}
+
+      <div id="llmFormBox" style="${cfg.configured && compact ? 'display:none' : ''}">
+        <div class="grid g2" style="gap:12px">
+          <div class="field"><label class="field__label">服务商</label>
+            <select class="select" id="llmProvider">
+              ${providers.map(([k, n]) => `<option value="${k}" ${((cfg.provider || 'deepseek') === k) ? 'selected' : ''}>${n}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label class="field__label">模型名称</label>
+            <input class="input mono" id="llmModel" value="${esc(cfg.model || 'deepseek-chat')}" placeholder="deepseek-chat">
+          </div>
+        </div>
+        <div class="field"><label class="field__label">接口地址</label>
+          <input class="input mono" id="llmBase" value="${esc(cfg.baseURL || 'https://api.deepseek.com')}" placeholder="https://api.deepseek.com">
+        </div>
+        <div class="field">
+          <label class="field__label">API Key</label>
+          <input class="input mono" id="llmKey" type="password" placeholder="${cfg.configured ? '已保存，如需更换请重新填写' : 'sk-...'}" autocomplete="new-password">
+          <div class="field__hint">在服务商后台创建。Key 保存在本机 data 目录，只用于调用模型，不会写进网页代码。</div>
+        </div>
+        <div class="row mt12">
+          <button class="btn btn--primary btn--sm" id="btnLlmSave">${icon('zap')} 保存并测试连通</button>
+          <span class="fs11 muted">会真的发一次请求验证，不是假装通过</span>
+        </div>
+      </div>
+
+      <div id="llmResult"></div>
+    </div>`;
+  }
+
+  function bindLlmForm() {
+    const edit = qi('#btnLlmEdit');
+    if (edit) edit.onclick = () => {
+      const box = qi('#llmFormBox');
+      if (box) box.style.display = '';
+    };
+
+    const sel = qi('#llmProvider');
+    if (sel) sel.onchange = () => {
+      const map = {
+        deepseek: ['https://api.deepseek.com', 'deepseek-chat'],
+        dashscope: ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'],
+        zhipu: ['https://open.bigmodel.cn/api/paas/v4', 'glm-4-plus'],
+        moonshot: ['https://api.moonshot.cn/v1', 'moonshot-v1-8k'],
+        openai: ['https://api.openai.com/v1', 'gpt-4o-mini'],
+      };
+      const v = map[sel.value];
+      if (v) {
+        qi('#llmBase').value = v[0];
+        qi('#llmModel').value = v[1];
+      }
+    };
+
+    const save = qi('#btnLlmSave');
+    if (!save) return;
+    save.onclick = async () => {
+      const cfg = {
+        provider: qi('#llmProvider').value,
+        baseURL: qi('#llmBase').value.trim(),
+        model: qi('#llmModel').value.trim(),
+        apiKey: qi('#llmKey').value.trim(),
+      };
+      if (!cfg.model) return toast('先填模型名称', 'warn');
+      if (!cfg.apiKey && !(window.LIVE.llm && window.LIVE.llm.configured)) {
+        return toast('先填 API Key', 'warn');
+      }
+
+      const box = qi('#llmResult');
+      save.disabled = true;
+      save.innerHTML = icon('refresh') + ' 正在请求模型…';
+      box.innerHTML = `<div class="env-summary is-idle mt12">${icon('info')}<span>正在向 ${esc(cfg.baseURL)} 发一次真实请求…</span></div>`;
+
+      try {
+        const r = await window.LIVE.saveLlm(cfg);
+        if (r.ok) {
+          box.innerHTML = `<div class="env-summary is-ok mt12">${icon('checkCircle')}<div>
+            <b>连通正常 · ${esc(r.config.model)}</b>
+            <span>模型回复「${esc(r.test.reply || '正常')}」· 往返 ${r.test.ms} ms · 消耗 ${r.test.usage?.total || 0} tokens</span>
+          </div></div>`;
+          logAct(`配置模型 ${r.config.model}，连通性测试通过`);
+          toast('模型已配置，连通性测试通过');
+          setTimeout(() => { renderStepPanel(); router(); }, 900);
+        } else {
+          box.innerHTML = `<div class="env-summary is-warn mt12">${icon('alert')}<div>
+            <b>没能连上（${esc(r.code || 'ERROR')}）</b><span>${esc(r.error)}</span>
+          </div></div>`;
+          toast('连通失败，看下面的原因', 'warn');
+        }
+      } catch (e) {
+        box.innerHTML = `<div class="env-summary is-warn mt12">${icon('alert')}<div><b>请求出错</b><span>${esc(e.message)}</span></div></div>`;
+      } finally {
+        save.disabled = false;
+        save.innerHTML = icon('zap') + ' 保存并测试连通';
+      }
+    };
   }
 
   function cfgModel() {
@@ -2552,14 +3022,61 @@
       pushUser(text);
       input.value = '';
       const typing = pushTyping();
-      await sleep(680 + Math.random() * 420);
-      typing.remove();
-      const r = answer(text);
 
-      // 提问计数回流到第 8 步的试用检查
-      S.portalAsks = (S.portalAsks || 0) + 1;
-      if (r.gap) S.portalMiss = (S.portalMiss || 0) + 1;
-      TM.save();
+      let r;
+      if (window.LIVE && window.LIVE.on) {
+        /* 真实问答：检索 + 模型生成 */
+        try {
+          const res = await window.LIVE.ask(text);
+          typing.remove();
+
+          if (res.error) {
+            body.insertAdjacentHTML('beforeend', `<div class="msg"><span class="msg__av">智</span><div class="msg__bubble" style="color:var(--danger)">调用模型失败：${esc(res.error)}</div></div>`);
+            body.scrollTop = body.scrollHeight;
+            return;
+          }
+
+          if (res.needLLM) {
+            const cites = (res.citations || []).map(c => `${c.doc}${c.page ? ' · P.' + c.page : ''}`);
+            const snippet = (res.citations || []).slice(0, 3)
+              .map(c => `<div style="margin-top:6px;padding:7px 9px;background:var(--surface-2);border-radius:6px;font-size:11.5px;line-height:1.6">${esc((c.snippet || '').slice(0, 150))}</div>`).join('');
+            r = {
+              a: `${esc(res.message || '')}${snippet}`,
+              cite: cites,
+              gap: false,
+            };
+          } else {
+            r = {
+              a: esc(res.answer || '').replace(/\n/g, '<br>'),
+              cite: (res.citations || []).map(c => `${c.doc}${c.page ? ' · P.' + c.page : ''}`),
+              gap: !!res.gap,
+            };
+          }
+
+          // 计数以服务端为准
+          if (res.stats) {
+            S.portalAsks = res.stats.asks || 0;
+            S.portalMiss = res.stats.miss || 0;
+          } else {
+            S.portalAsks = (S.portalAsks || 0) + 1;
+            if (r.gap) S.portalMiss = (S.portalMiss || 0) + 1;
+          }
+          TM.save();
+          window.LIVE.syncSoon();
+        } catch (e) {
+          typing.remove();
+          body.insertAdjacentHTML('beforeend', `<div class="msg"><span class="msg__av">智</span><div class="msg__bubble" style="color:var(--danger)">请求失败：${esc(e.message)}</div></div>`);
+          body.scrollTop = body.scrollHeight;
+          return;
+        }
+      } else {
+        await sleep(680 + Math.random() * 420);
+        typing.remove();
+        r = answer(text);
+        S.portalAsks = (S.portalAsks || 0) + 1;
+        if (r.gap) S.portalMiss = (S.portalMiss || 0) + 1;
+        TM.save();
+      }
       const an = qi('#askNum'), mn = qi('#missNum'), ab = qi('#accBar'), at = qi('#accTxt');
       if (an) an.textContent = S.portalAsks;
       if (mn) mn.textContent = S.portalMiss || 0;
@@ -2811,4 +3328,7 @@
   /* 启动 */
   window.addEventListener('hashchange', router);
   router();
+
+  /* 供 live 模式在数据就绪后重新渲染 */
+  window.__appRefresh = () => router();
 })();

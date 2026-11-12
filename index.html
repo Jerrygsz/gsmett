@@ -162,6 +162,7 @@
 </div>
 
 <script src="assets/js/data.js"></script>
+<script src="assets/js/api.js"></script>
 <script>
 (function () {
   const { qi, qa, toast } = TM;
@@ -182,9 +183,20 @@
     };
   });
 
-  function go(target) {
+  async function go(target) {
     TM.load();
     sessionStorage.setItem('tm_entered', '1');
+
+    // 本地服务可用：进到真实客户的工作空间
+    try {
+      if (await API.detect()) {
+        const r = await API.clients();
+        const first = (r.clients || [])[0];
+        location.href = first ? `app.html?c=${first.id}` : 'app.html';
+        return;
+      }
+    } catch (e) { /* 落到演示模式 */ }
+
     location.href = target || 'app.html';
   }
 
@@ -196,7 +208,7 @@
     setTimeout(() => go('app.html'), 520);
   };
 
-  qi('#formReg').onsubmit = (e) => {
+  qi('#formReg').onsubmit = async (e) => {
     e.preventDefault();
     const org = qi('#regOrg').value.trim();
     const name = qi('#regName').value.trim();
@@ -207,6 +219,29 @@
 
     // 新注册企业：清空进度与演示数据，从第 1 步开始
     TM.reset();
+
+    // 本地服务可用：真建一个客户，后面所有步骤都落盘
+    if (window.API) {
+      const btn0 = e.target.querySelector('button[type=submit]');
+      btn0.disabled = true;
+      btn0.textContent = '正在创建工作空间…';
+      try {
+        if (await API.detect()) {
+          const r = await API.createClient({
+            org, contact: name, email,
+            size: qi('#regSize') ? qi('#regSize').value : '11–50 人',
+            svc: '企业 AI 知识库建设',
+          });
+          if (r.client) {
+            sessionStorage.setItem('tm_entered', '1');
+            location.href = `app.html?c=${r.client.id}`;
+            return;
+          }
+        }
+      } catch (err) { /* 退回本地模式 */ }
+      btn0.disabled = false;
+      btn0.textContent = '创建企业工作空间';
+    }
     const s = TM.load();
     const sizeSel = qi('#regSize');
     s.org.name = org;
