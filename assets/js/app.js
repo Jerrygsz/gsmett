@@ -561,7 +561,7 @@
               : inviteBox()}
           </div>` : ''}
 
-          ${step.exec && step.id !== 7 ? `
+          ${step.exec && step.id !== 7 && step.id !== 2 ? `
           <div class="step-block">
             <div class="step-block__label">自动执行</div>
             <div class="exec-box">
@@ -581,6 +581,8 @@
               ${!saved.executed && st !== 'locked' ? `<div class="fs11 muted mt8">执行前请确认：这一步只读取你在本步骤中提供的内容，不会访问其他文件。</div>` : ''}
             </div>
           </div>` : ''}
+
+          ${step.id === 2 ? envBlock(step, st, saved) : ''}
 
           <div class="step-block">
             <div class="step-block__label" id="gateLabel">完成检查 · ${checkedCount}/${checkTotal}</div>
@@ -674,7 +676,7 @@
 
     // 执行
     const be = qi('#btnExec');
-    if (be) be.onclick = () => runExec(step, be);
+    if (be) be.onclick = () => (step.id === 2 ? runEnvCheck(step, be) : runExec(step, be));
 
     // 完成
     const bd = qi('#btnDone');
@@ -696,6 +698,273 @@
   }
 
   /* 第 3、4 步的日志跟着实际资料走，避免数字对不上 */
+  /* =====================================================================
+     第 2 步 · 环境检查
+     浏览器沙箱能读到什么就读什么，读不到的一概不编
+     ===================================================================== */
+
+  /* 浏览器拿不到的项：说明为什么拿不到，别含糊过去 */
+  const ENV_LOCAL = [
+    { k: 'disk', label: '系统盘可用空间', need: '≥ 40 GB', why: '浏览器无权读取磁盘剩余容量' },
+    { k: 'cpu', label: '处理器型号', need: 'i5 / R5 以上', why: '浏览器只给核心数，不给具体型号' },
+    { k: 'docker', label: 'Docker Desktop', need: '已安装并运行', why: '需要本地程序查询已安装软件' },
+    { k: 'port', label: '3000 端口占用', need: '需空闲', why: '需要本地程序执行端口探测' },
+  ];
+
+  const fmtGB = (n) => (n / 1073741824).toFixed(1) + ' GB';
+
+  async function probeEnv() {
+    const ua = navigator.userAgent || '';
+    const uad = navigator.userAgentData || null;
+
+    // 系统版本与处理器架构：需要高熵值，可能被浏览器拒绝
+    let pv = '', arch = '';
+    try {
+      if (uad && uad.getHighEntropyValues) {
+        const h = await uad.getHighEntropyValues(['platformVersion', 'architecture', 'bitness']);
+        pv = h.platformVersion || '';
+        arch = [h.architecture, h.bitness ? h.bitness + ' 位' : ''].filter(Boolean).join(' · ');
+      }
+    } catch (e) { /* 被拒绝就用 UA 兜底 */ }
+
+    let osVal = '未能识别', osState = 'unknown';
+    const isWin = /Windows/.test(ua) || (uad && uad.platform === 'Windows');
+    if (isWin) {
+      const major = parseInt(String(pv).split('.')[0], 10);
+      if (/Windows NT 6\.1/.test(ua)) { osVal = 'Windows 7'; osState = 'warn'; }
+      else if (major >= 13) { osVal = 'Windows 11'; osState = 'ok'; }
+      else if (major >= 1) { osVal = 'Windows 10'; osState = 'ok'; }
+      else { osVal = 'Windows'; osState = 'ok'; }
+      if (arch) osVal += ' · ' + arch;
+    } else if (/iPhone|iPad|iPod/.test(ua)) {
+      // 注意：iOS 的 UA 里也带 "like Mac OS X"，必须先判 iOS 再判 macOS
+      osVal = 'iPhone / iPad'; osState = 'warn';
+    } else if (/Android/.test(ua)) {
+      osVal = 'Android 手机 / 平板'; osState = 'warn';
+    } else if (/Macintosh|Mac OS X/.test(ua)) {
+      osVal = 'macOS'; osState = 'ok';
+    } else if (/Linux/.test(ua)) {
+      osVal = 'Linux'; osState = 'ok';
+    }
+
+    let brVal = '未能识别';
+    if (uad && uad.brands) {
+      const b = uad.brands.find(x => !/Not.?A.?Brand/i.test(x.brand));
+      if (b) brVal = `${b.brand} ${b.version}`;
+    }
+    if (brVal === '未能识别') {
+      const m = ua.match(/(Edg|Chrome|Firefox|Version)\/([\d.]+)/);
+      if (m) brVal = `${m[1] === 'Edg' ? 'Edge' : m[1]} ${m[2].split('.')[0]}`;
+    }
+
+    let memVal = '浏览器未提供', memState = 'unknown';
+    if (navigator.deviceMemory) {
+      const g = navigator.deviceMemory;
+      memVal = g >= 8 ? '≥ 8 GB（浏览器上限值）' : `约 ${g} GB`;
+      memState = g >= 8 ? 'ok' : 'warn';
+    }
+
+    let stVal = '浏览器未提供';
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        stVal = est && est.quota ? fmtGB(est.quota) + ' · 网页存储上限' : '浏览器未提供';
+      }
+    } catch (e) { }
+
+    const c = navigator.connection || {};
+    const online = navigator.onLine;
+    const slow = c.effectiveType && /^(slow-)?2g$/.test(c.effectiveType);
+
+    // 真发一个请求测往返时延，比 navigator.connection 的估算值可信
+    let realRtt = null;
+    if (online) {
+      try {
+        const t0 = performance.now();
+        await fetch(location.pathname + '?_probe=' + Date.now(), { method: 'HEAD', cache: 'no-store' });
+        realRtt = Math.round(performance.now() - t0);
+      } catch (e) { /* 拿不到就退回估算值 */ }
+    }
+
+    const netVal = online
+      ? [
+          c.effectiveType || '已联网',
+          realRtt !== null ? `实测往返 ${realRtt} ms` : (c.rtt ? `估算延迟 ${c.rtt} ms` : ''),
+        ].filter(Boolean).join(' · ')
+      : '当前离线';
+
+    const cores = navigator.hardwareConcurrency || 0;
+
+    const web = [
+      { k: 'os', label: '操作系统', value: osVal, state: osState, need: 'Windows 10 以上' },
+      { k: 'browser', label: '浏览器', value: brVal, state: 'ok', need: '用于访问本平台' },
+      { k: 'cores', label: '逻辑处理器', value: cores ? cores + ' 个核心' : '浏览器未提供', state: cores >= 4 ? 'ok' : 'warn', need: '建议 4 核以上' },
+      { k: 'mem', label: '设备内存', value: memVal, state: memState, need: '建议 8 GB 以上' },
+      { k: 'net', label: '网络状态', value: netVal, state: online && !slow ? 'ok' : 'warn', need: '需要联网' },
+      { k: 'store', label: '网页存储配额', value: stVal, state: 'info', need: '参考值' },
+    ];
+
+    return { web, local: ENV_LOCAL.map(x => ({ ...x, value: '浏览器无权读取', state: 'na' })), at: new Date().toISOString() };
+  }
+
+  const envDot = (st) => ({
+    ok: ['var(--success)', 'var(--success-bg)'],
+    warn: ['var(--warn)', 'var(--warn-bg)'],
+    na: ['var(--text-4)', 'var(--surface-3)'],
+    info: ['var(--brand)', 'var(--brand-50)'],
+    unknown: ['var(--text-4)', 'var(--surface-3)'],
+  }[st] || ['var(--text-4)', 'var(--surface-3)']);
+
+  function envRow(r, live) {
+    const [fg, bg] = envDot(live ? r.state : 'unknown');
+    return `<div class="env-row${live ? ' is-live' : ''}" data-env="${r.k}">
+      <span class="env-row__dot" style="color:${fg};background:${bg}">
+        ${live && r.state === 'ok' ? icon('check') : live && r.state === 'warn' ? icon('alert') : live && r.state === 'na' ? icon('lock') : icon('minus')}
+      </span>
+      <span class="env-row__k">${esc(r.label)}</span>
+      <span class="env-row__v"${live ? '' : ' style="color:var(--text-4)"'}>${live ? esc(r.value) : '—'}</span>
+      <span class="env-row__need">${esc(r.need || '')}</span>
+    </div>`;
+  }
+
+  function envBlock(step, st, saved) {
+    const env = S.project.env;
+    const locked = st === 'locked';
+    const done = !!env;
+
+    const web = env ? env.web : [
+      { k: 'os', label: '操作系统', value: '—', need: 'Windows 10 以上' },
+      { k: 'browser', label: '浏览器', value: '—', need: '用于访问本平台' },
+      { k: 'cores', label: '逻辑处理器', value: '—', need: '建议 4 核以上' },
+      { k: 'mem', label: '设备内存', value: '—', need: '建议 8 GB 以上' },
+      { k: 'net', label: '网络状态', value: '—', need: '需要联网' },
+      { k: 'store', label: '网页存储配额', value: '—', need: '参考值' },
+    ];
+    const local = env ? env.local : ENV_LOCAL.map(x => ({ ...x, value: '—', state: 'na' }));
+
+    const okCount = env ? env.web.filter(x => x.state === 'ok').length : 0;
+    const warnList = env ? env.web.filter(x => x.state === 'warn') : [];
+
+    return `<div class="step-block">
+      <div class="step-block__label">环境检查</div>
+      <div class="exec-box">
+        <div class="exec-box__top">
+          <span class="exec-box__ico">${icon('monitor')}</span>
+          <div style="flex:1">
+            <b>${esc(step.exec.label)}</b>
+            <span>${esc(step.exec.desc)}</span>
+          </div>
+          <button class="btn btn--ghost btn--sm" id="btnExec" ${locked || (saved.executed && done) ? 'disabled' : ''}>
+            ${done ? icon('refresh') + ' 重新检查' : icon('play') + ' 开始检查'}
+          </button>
+        </div>
+
+        <div class="env-group">
+          <div class="env-group__head">
+            <b>浏览器可实测</b>
+            <span>${done ? `6 项 · 检测于 ${env.at.slice(11, 16)}` : '6 项 · 本机真实数据'}</span>
+          </div>
+          <div id="envWeb">${web.map(r => envRow(r, done)).join('')}</div>
+        </div>
+
+        <div class="env-group">
+          <div class="env-group__head">
+            <b>需本地助手才能测</b>
+            <span>4 项 · 浏览器读不到</span>
+          </div>
+          ${local.map(x => `<div class="env-row is-na">
+            <span class="env-row__dot" style="color:var(--text-4);background:var(--surface-3)">${icon('lock')}</span>
+            <span class="env-row__k">${esc(x.label)}</span>
+            <span class="env-row__v" style="color:var(--text-3)">${esc(x.why || '浏览器无权读取')}</span>
+            <span class="env-row__need">${esc(x.need || '')}</span>
+          </div>`).join('')}
+        </div>
+
+        <div id="envSummary">${done ? envSummaryHTML(env) : `<div class="env-summary is-idle">${icon('info')}<span>还没检查。点右上角「开始检查」，下面这 6 项会填上你这台机器的真实参数。</span></div>`}</div>
+
+        <div class="note note--info mt12">${icon('shield')}<span><b>为什么有 4 项测不了：</b>网页运行在浏览器沙箱里，按安全规则无权读取你的硬盘容量、已安装的软件和端口占用。这不是平台没做，是浏览器不允许。要自动检测这几项，需要安装贸智库本地助手，由你在本机授权后执行。</span></div>
+      </div>
+    </div>`;
+  }
+
+  function envSummaryHTML(env) {
+    const okN = env.web.filter(x => x.state === 'ok').length;
+    const warns = env.web.filter(x => x.state === 'warn');
+    const mobile = /Android|iPhone|iPad|iPod/.test(navigator.userAgent);
+    let tip = '';
+    if (mobile) tip = '你现在用的是手机或平板——知识库要装在那台长期开机的电脑上，请在电脑上重做这一步。';
+    else if (warns.some(w => w.k === 'net')) tip = '网络状态异常，先解决联网问题再继续。';
+    else if (warns.some(w => w.k === 'mem')) tip = '内存偏小，导入大批资料时可能变慢。';
+    else if (warns.some(w => w.k === 'os')) tip = '操作系统版本偏低，建议升级后再部署。';
+
+    const infoN = env.web.filter(x => x.state === 'info').length;
+    return `<div class="env-summary ${warns.length ? 'is-warn' : 'is-ok'}">
+      ${icon(warns.length ? 'alert' : 'checkCircle')}
+      <div>
+        <b>浏览器侧 6 项已读取 · ${okN} 项达标${warns.length ? ` · ${warns.length} 项需注意` : ''}${infoN ? ` · ${infoN} 项参考值` : ''}</b>
+        <span>${warns.length ? tip : '这台机器的系统与网络满足运行要求。'}本地 4 项尚未检测，需要安装本地助手或你人工确认。</span>
+      </div>
+    </div>`;
+  }
+
+  async function runEnvCheck(step, btn) {
+    btn.disabled = true;
+    btn.innerHTML = icon('refresh') + ' 检测中…';
+
+    // 先把行复位，避免上一次的结果留着
+    const env = await probeEnv();
+    const box = qi('#envWeb');
+    if (box) box.innerHTML = env.web.map(r => envRow(r, false)).join('');
+    await sleep(250);
+
+    for (const r of env.web) {
+      const row = qi(`[data-env="${r.k}"] .env-row__v`);
+      const dot = qi(`[data-env="${r.k}"] .env-row__dot`);
+      const wrap = qi(`[data-env="${r.k}"]`);
+      if (row) { row.textContent = r.value; row.style.color = ''; }
+      if (wrap) wrap.classList.add('is-live');
+      if (dot) {
+        const [fg, bg] = envDot(r.state);
+        dot.style.color = fg;
+        dot.style.background = bg;
+        dot.innerHTML = r.state === 'ok' ? icon('check') : r.state === 'warn' ? icon('alert') : icon('minus');
+      }
+      await sleep(150);
+    }
+
+    S.project.env = env;
+    TM.save();
+
+    const sum = qi('#envSummary');
+    if (sum) sum.innerHTML = envSummaryHTML(env);
+
+    const head = qi('#envWeb')?.parentElement?.querySelector('.env-group__head span');
+    if (head) head.textContent = '6 项 · 检测于 ' + env.at.slice(11, 16);
+
+    btn.disabled = false;
+    btn.innerHTML = icon('refresh') + ' 重新检查';
+
+    const okN = env.web.filter(x => x.state === 'ok').length;
+    const warnN = env.web.filter(x => x.state === 'warn').length;
+
+    // 只有实测全过才自动核验 c1；有告警就让用户自己判断
+    const reverted = setCheck(step, 'c1', warnN === 0);
+    const saved = TM.stepState(step.id);
+    saved.executed = true;
+    TM.save();
+    refreshGate(step, saved);
+
+    logAct(`环境检查完成 · 浏览器侧 ${okN}/6 通过`, '系统');
+
+    // 只发一条提示：连发两条会叠在一起挡住内容
+    if (reverted) {
+      toast(`检查完成：${warnN} 项未通过，这一步需要重新确认`, 'warn');
+      router();
+    } else {
+      toast(warnN ? `检查完成，${warnN} 项需要处理` : '检查完成：系统与网络满足要求', warnN ? 'warn' : 'success');
+    }
+  }
+
   function buildLogs(step) {
     const files = S.project.files || [];
 
