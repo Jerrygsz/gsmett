@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作空间 · 贸智库 TradeMind</title>
+<meta name="description" content="贸智库企业工作空间 — 项目向导、配置中心、测试验收与员工门户。">
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300867D'/%3E%3Cpath d='M9 9h5a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H9z' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linejoin='round'/%3E%3Cpath d='M23 9h-3a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H23z' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ===================== 侧边栏 ===================== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar__brand">
+      <span class="logo-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 5.5h6a2.5 2.5 0 0 1 2.5 2.5v11a2 2 0 0 0-2-2H4z"/>
+          <path d="M20 5.5h-6A2.5 2.5 0 0 0 11.5 8v11a2 2 0 0 1 2-2H20z"/>
+        </svg>
+      </span>
+      <div class="sidebar__brand-txt">
+        <b>贸智库</b>
+        <span>TradeMind</span>
+      </div>
+    </div>
+
+    <div class="sidebar__org" id="orgSwitch" title="切换企业工作空间">
+      <span class="avatar avatar--sq" style="background:#1F4A52">恒</span>
+      <div class="sidebar__org-txt">
+        <b id="orgShort">恒森进出口</b>
+        <span>标准交付 · 30 人</span>
+      </div>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:13px;height:13px;opacity:.5"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>
+    </div>
+
+    <nav class="sidebar__nav" id="nav">
+      <div class="nav-group__label">服务中心</div>
+      <a class="nav-item" data-route="dashboard" href="#dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>工作台</span>
+      </a>
+      <a class="nav-item" data-route="store" href="#store">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+        <span>服务商城</span>
+      </a>
+      <a class="nav-item" data-route="wizard" href="#wizard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/></svg>
+        <span>项目向导</span>
+        <span class="nav-item__badge" id="navProg">0%</span>
+      </a>
+
+      <div class="nav-group__label">企业配置</div>
+      <a class="nav-item" data-route="config" href="#config">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5h4M11 7.5h10M3 16.5h9M16 16.5h5"/><circle cx="9" cy="7.5" r="2"/><circle cx="14" cy="16.5" r="2"/></svg>
+        <span>配置中心</span>
+      </a>
+      <a class="nav-item" data-route="members" href="#members">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>成员与权限</span>
+      </a>
+
+      <div class="nav-group__label">交付与使用</div>
+      <a class="nav-item" data-route="test" href="#test">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 15.9A10 10 0 1 1 8.1 2.8"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+        <span>测试与验收</span>
+      </a>
+      <a class="nav-item" data-route="portal" href="#portal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="2.5" r="1.5"/><circle cx="9" cy="14" r="1.2"/><circle cx="15" cy="14" r="1.2"/><path d="M2 13v3M22 13v3"/></svg>
+        <span>员工门户</span>
+      </a>
+      <a class="nav-item" data-route="logs" href="#logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        <span>操作与运行记录</span>
+      </a>
+
+      <div class="nav-group__label">服务方</div>
+      <a class="nav-item" href="admin.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>服务商后台</span>
+        <span class="nav-item__badge nav-item__badge--hot">4</span>
+      </a>
+    </nav>
+
+    <div class="sidebar__foot">
+      <a class="sidebar__user" href="#settings" data-route="settings">
+        <span class="avatar" id="userAvatar">陈</span>
+        <div class="sidebar__user-txt">
+          <b id="userName">陈志强</b>
+          <span>企业管理员</span>
+        </div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:14px;height:14px;opacity:.45;margin-left:auto"><circle cx="12" cy="12" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+      </a>
+    </div>
+  </aside>
+
+  <!-- ===================== 主区 ===================== -->
+  <div class="main">
+    <header class="topbar">
+      <button class="btn btn--quiet btn--sm" id="btnMenu" style="display:none;padding:0 6px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div>
+        <div class="topbar__title" id="pageTitle">工作台</div>
+      </div>
+      <div class="topbar__spacer"></div>
+      <div class="topbar__search" id="btnSearch">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>搜索项目、资料、成员</span>
+        <kbd>⌘K</kbd>
+      </div>
+      <button class="btn btn--ghost btn--sm" id="btnHelp">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M9.2 9.2a2.9 2.9 0 0 1 5.6 1c0 1.9-2.8 2.4-2.8 4"/><path d="M12 17.5h.01"/></svg>
+        申请人工协助
+      </button>
+    </header>
+
+    <div id="view"></div>
+  </div>
+</div>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>

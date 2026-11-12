@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>服务商后台 · 贸智库 TradeMind</title>
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B191F'/%3E%3Cpath d='M9 9h5a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H9z' fill='none' stroke='%233FD3C2' stroke-width='1.8' stroke-linejoin='round'/%3E%3Cpath d='M23 9h-3a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H23z' fill='none' stroke='%233FD3C2' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- 顶部导航：服务商视角 -->
+<header style="background:var(--sidebar);border-bottom:1px solid rgba(255,255,255,.07);position:sticky;top:0;z-index:50">
+  <div style="max-width:1320px;margin:0 auto;padding:0 26px;height:56px;display:flex;align-items:center;gap:14px">
+    <span class="logo-mark" style="background:linear-gradient(140deg,#123239,#0B191F);box-shadow:inset 0 0 0 1px rgba(63,211,194,.35)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#3FD3C2" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 5.5h6a2.5 2.5 0 0 1 2.5 2.5v11a2 2 0 0 0-2-2H4z"/>
+        <path d="M20 5.5h-6A2.5 2.5 0 0 0 11.5 8v11a2 2 0 0 1 2-2H20z"/>
+      </svg>
+    </span>
+    <div style="display:flex;flex-direction:column;line-height:1.2">
+      <b style="color:#fff;font-size:14px;font-weight:600">贸智库</b>
+      <span style="font-size:10px;color:#5F757E;letter-spacing:.08em;text-transform:uppercase">服务商后台</span>
+    </div>
+
+    <nav style="display:flex;gap:2px;margin-left:22px">
+      <a href="#" onclick="return false" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:#fff;background:rgba(0,160,147,.16);font-weight:520">总览</a>
+      <a href="#clients" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">客户</a>
+      <a href="#projects" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">项目</a>
+      <a href="#assist" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">协助</a>
+      <a href="#tasks" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">任务</a>
+    </nav>
+
+    <div style="flex:1"></div>
+    <span class="badge" style="background:rgba(196,85,31,.18);color:#F0A97C">4 个协助请求待处理</span>
+    <a href="app.html" class="btn btn--sm" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#fff">切回客户端</a>
+    <span class="avatar" style="width:28px;height:28px;font-size:11px;background:#1F4A52">周</span>
+  </div>
+</header>
+
+<div class="page" style="max-width:1320px">
+
+  <div class="page-head">
+    <div class="page-head__txt">
+      <h1>总览</h1>
+      <p>7 个客户 · 5 个进行中 · 4 个协助请求待处理。这里是你业务的核心资产：每个项目的交付过程都会沉淀成模板。</p>
+    </div>
+    <div class="row">
+      <button class="btn btn--ghost btn--sm" id="btnExport">导出周报</button>
+      <button class="btn btn--primary btn--sm" id="btnNewClient">+ 新建客户</button>
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <div class="grid g4">
+    <div class="admin-kpi">
+      <div class="admin-kpi__label">进行中项目</div>
+      <div class="admin-kpi__val">5</div>
+      <div class="admin-kpi__delta up">+2 较上月</div>
+    </div>
+    <div class="admin-kpi">
+      <div class="admin-kpi__label">本月确认收入</div>
+      <div class="admin-kpi__val tnum">¥ 78,400</div>
+      <div class="admin-kpi__delta up">+18.4% 较上月</div>
+    </div>
+    <div class="admin-kpi">
+      <div class="admin-kpi__label">平均交付周期</div>
+      <div class="admin-kpi__val">26 <span style="font-size:13px;font-weight:500;color:var(--text-3)">天</span></div>
+      <div class="admin-kpi__delta down">+3 天 较上季</div>
+    </div>
+    <div class="admin-kpi">
+      <div class="admin-kpi__label">验收一次通过率</div>
+      <div class="admin-kpi__val">83%</div>
+      <div class="admin-kpi__delta up">+6% 较上季</div>
+    </div>
+  </div>
+
+  <!-- 项目看板 -->
+  <div id="projects" class="section-head" style="margin-top:26px">
+    <h3>项目看板</h3><span>按交付阶段</span>
+    <div class="row--between"><span class="fs12 muted">共 7 个项目</span></div>
+  </div>
+
+  <div class="kanban">
+    <div class="kanban__col">
+      <div class="kanban__head">需求确认 <span>2</span></div>
+      <div class="kanban-card">
+        <b>青岛万隆机械 · 知识库</b>
+        <div class="fs11 muted">孙磊 · 需求确认会议 11-18</div>
+        <div class="kanban-card__meta"><span>¥18,800</span><span class="badge badge--warn">8%</span></div>
+      </div>
+      <div class="kanban-card">
+        <b>宁波海途户外 · 培训系统</b>
+        <div class="fs11 muted">王倩 · 待启动</div>
+        <div class="kanban-card__meta"><span>¥8,800</span><span class="badge">0%</span></div>
+      </div>
+    </div>
+
+    <div class="kanban__col">
+      <div class="kanban__head">实施中 <span>3</span></div>
+      <div class="kanban-card" style="border-color:var(--brand);box-shadow:0 0 0 1px var(--brand-100)">
+        <b>深圳恒森进出口 · 知识库</b>
+        <div class="fs11 muted">陈志强 · 第 6 步 / 共 10 步 · 周明</div>
+        <div class="kanban-card__meta"><span>¥18,800</span><span class="badge badge--brand">50%</span></div>
+      </div>
+      <div class="kanban-card">
+        <b>东莞锐拓五金 · 销售助手</b>
+        <div class="fs11 muted">刘伟 · 第 8 步 / 共 10 步 · 周明</div>
+        <div class="kanban-card__meta"><span>¥12,600</span><span class="badge badge--brand">72%</span></div>
+      </div>
+      <div class="kanban-card">
+        <b>厦门拓洋贸易 · 销售助手</b>
+        <div class="fs11 muted">林志远 · API 校验失败 · 林可</div>
+        <div class="kanban-card__meta"><span>¥12,600</span><span class="badge badge--danger">34%</span></div>
+      </div>
+    </div>
+
+    <div class="kanban__col">
+      <div class="kanban__head">验收中 <span>1</span></div>
+      <div class="kanban-card">
+        <b>广州鑫联电子 · 知识库</b>
+        <div class="fs11 muted">张海 · 待整改 3 项 · 林可</div>
+        <div class="kanban-card__meta"><span>¥18,800</span><span class="badge badge--warn">88%</span></div>
+      </div>
+    </div>
+
+    <div class="kanban__col">
+      <div class="kanban__head">维护期 <span>1</span></div>
+      <div class="kanban-card">
+        <b>佛山欧盛家居 · 知识库</b>
+        <div class="fs11 muted">黄敏 · 维护期至 2027-10</div>
+        <div class="kanban-card__meta"><span>¥1,200/月</span><span class="badge badge--success">100%</span></div>
+      </div>
+      <div style="text-align:center;padding:12px 0">
+        <span class="fs11 muted">续费提醒：30 天后</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 客户表 -->
+  <div id="clients" class="section-head" style="margin-top:26px">
+    <h3>客户与项目</h3><span>7 家</span>
+    <div class="row--between">
+      <button class="btn btn--quiet btn--sm">按阶段筛选</button>
+    </div>
+  </div>
+  <div class="card" style="overflow:hidden">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>企业</th><th style="width:130px">服务</th><th style="width:100px">阶段</th>
+          <th style="width:150px">进度</th><th style="width:90px">负责人</th>
+          <th style="width:100px">金额</th><th style="width:110px">计划交付</th><th style="width:70px"></th>
+        </tr>
+      </thead>
+      <tbody id="clientRows"></tbody>
+    </table>
+  </div>
+
+  <div class="grid g2 mt24" style="align-items:start;gap:18px">
+
+    <!-- 协助请求 -->
+    <div id="assist">
+      <div class="section-head" style="margin-top:0">
+        <h3>人工协助请求</h3><span>4 个待处理</span>
+      </div>
+      <div id="assistList"></div>
+    </div>
+
+    <!-- 我的任务 -->
+    <div id="tasks">
+      <div class="section-head" style="margin-top:0">
+        <h3>我的任务</h3><span>本周 6 项</span>
+        <div class="row--between"><span class="fs12 muted">按截止时间</span></div>
+      </div>
+      <div class="card card--pad">
+        <div class="stack" style="gap:0" id="taskList"></div>
+      </div>
+
+      <div class="card card--pad mt16">
+        <div class="row--between mb12">
+          <b class="fs13">交付模板沉淀</b>
+          <span class="badge badge--brand">核心资产</span>
+        </div>
+        <p class="fs12 muted" style="line-height:1.65">每次交付完的项目，步骤里的操作细节、客户常卡住的地方、测试题的命中分布，都会被回收进模板。下一个同类客户可以直接复用，交付周期会一轮比一轮短。</p>
+        <div class="row mt12" style="gap:18px">
+          <div><div class="fs11 muted">已沉淀模板</div><div class="fs15 b6 tnum mt4">3 套</div></div>
+          <div><div class="fs11 muted">复用率</div><div class="fs15 b6 tnum mt4">64%</div></div>
+          <div><div class="fs11 muted">节省工时</div><div class="fs15 b6 tnum mt4">38 h</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note note--warn mt24">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+    <span><b>边界提醒：</b>这个后台不提供任何远程命令执行能力。「远程协助」仅限于查看客户授权的部署状态与错误日志。涉及客户电脑上的文件读写、软件安装、服务启停，必须由客户本地的助手程序执行，或由客户本人在场确认后人工操作。</span>
+  </div>
+</div>
+
+<script src="assets/js/data.js"></script>
+<script>
+(function () {
+  const { qi, icon, esc, toast, modal, ADMIN_CLIENTS, ASSIST_REQ, TASKS_MINE } = TM;
+
+  /* 客户表 */
+  const stageBadge = (s) =>
+    s === '实施中' ? 'badge--brand' :
+    s === '验收中' ? 'badge--warn' :
+    s === '维护期' ? 'badge--success' :
+    s === '需求确认' ? '' : '';
+
+  const healthDot = (h) => h === 'good' ? 'var(--success)' : h === 'warn' ? 'var(--warn)' : 'var(--danger)';
+
+  qi('#clientRows').innerHTML = ADMIN_CLIENTS.map(c => `
+    <tr>
+      <td>
+        <div class="row" style="gap:9px">
+          <span style="width:6px;height:6px;border-radius:50%;background:${healthDot(c.health)};flex:0 0 6px"></span>
+          <div>
+            <div class="fs12 b5">${esc(c.org)}</div>
+            <div class="fs11 muted">${esc(c.contact)}</div>
+          </div>
+        </div>
+      </td>
+      <td class="fs12 muted">${esc(c.svc)}</td>
+      <td><span class="badge ${stageBadge(c.stage)}">${esc(c.stage)}</span></td>
+      <td>
+        <div class="row" style="gap:8px">
+          <div class="bar" style="flex:1;height:5px"><div class="bar__fill" style="width:${c.pct}%"></div></div>
+          <span class="fs11 tnum b5" style="min-width:28px;text-align:right">${c.pct}%</span>
+        </div>
+      </td>
+      <td class="fs12">${esc(c.owner)}</td>
+      <td class="fs12 tnum">${esc(c.amount)}</td>
+      <td class="fs11 muted">${esc(c.due)}</td>
+      <td><button class="btn btn--quiet btn--sm" style="padding:0 4px" data-open="${esc(c.org)}">${icon('chevronRight')}</button></td>
+    </tr>`).join('');
+
+  document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => {
+    const org = b.dataset.open;
+    if (org.includes('恒森')) { location.href = 'app.html#wizard'; return; }
+    toast(`演示环境：${org} 的项目档案未接入`, 'info');
+  });
+
+  /* 协助请求 */
+  qi('#assistList').innerHTML = ASSIST_REQ.map((a, i) => `
+    <div class="assist-item">
+      <span class="assist-item__pri ${a.pri === 'high' ? 'assist-item__pri--high' : ''}"></span>
+      <div style="flex:1;min-width:0">
+        <div class="row--between" style="gap:10px">
+          <b class="fs12">${esc(a.org)}</b>
+          <span class="fs11 muted" style="flex:0 0 auto">${esc(a.wait)}</span>
+        </div>
+        <p class="fs12 muted mt4" style="line-height:1.6">${esc(a.issue)}</p>
+        <div class="row mt8" style="gap:8px">
+          <span class="tag tag--outline">${esc(a.owner)}</span>
+          <button class="btn btn--ghost btn--sm" data-reply="${i}">处理</button>
+          <button class="btn btn--quiet btn--sm" data-transfer="${i}">转派</button>
+        </div>
+      </div>
+    </div>`).join('');
+
+  document.querySelectorAll('[data-reply]').forEach(b => b.onclick = () => {
+    const a = ASSIST_REQ[+b.dataset.reply];
+    modal({
+      title: `处理协助：${a.org}`,
+      desc: a.issue,
+      body: `<div class="note note--info mb16">${icon('info')}<span>你可以在客户授权范围内查看部署状态与错误日志，但不能执行远程命令。需要操作客户电脑时，请预约远程会议或引导客户自行操作。</span></div>
+        <div class="field"><label class="field__label">处理方式</label><select class="select">
+          <option>查看日志后给出方案</option><option>预约远程会议（客户共享屏幕）</option><option>引导客户自行操作</option><option>调整交付方案</option>
+        </select></div>
+        <div class="field" style="margin-bottom:0"><label class="field__label">给客户的回复</label><textarea class="textarea" placeholder="用客户能听懂的话说明原因和下一步"></textarea></div>`,
+      okText: '提交回复',
+      onOk: () => toast('已回复客户，工单转为等待客户确认'),
+    });
+  });
+
+  document.querySelectorAll('[data-transfer]').forEach(b => b.onclick = () => toast('已转派给林可', 'info'));
+
+  /* 任务 */
+  qi('#taskList').innerHTML = TASKS_MINE.map(t => `
+    <div class="todo-item" style="${t.done ? 'opacity:.5' : ''}">
+      <span class="todo-item__ico" style="background:${t.done ? 'var(--success-bg)' : 'var(--surface-3)'};color:${t.done ? 'var(--success)' : 'var(--text-3)'}">
+        ${icon(t.done ? 'check' : 'clock')}
+      </span>
+      <div class="todo-item__body">
+        <b style="${t.done ? 'text-decoration:line-through' : ''}">${esc(t.txt)}</b>
+        <span>${esc(t.who)} · ${esc(t.due)}</span>
+      </div>
+    </div>`).join('');
+
+  qi('#btnNewClient').onclick = () => modal({
+    title: '新建客户',
+    desc: '客户档案会与项目、任务、验收报告关联。',
+    body: `<div class="grid g2" style="gap:12px">
+        <div class="field"><label class="field__label">企业名称</label><input class="input" placeholder="营业执照全称"></div>
+        <div class="field"><label class="field__label">联系人</label><input class="input" placeholder="姓名"></div>
+        <div class="field"><label class="field__label">服务</label><select class="select"><option>企业 AI 知识库</option><option>AI 外贸销售助手</option><option>企业 AI 培训系统</option></select></div>
+        <div class="field"><label class="field__label">负责人</label><select class="select"><option>周明</option><option>林可</option></select></div>
+      </div>
+      <div class="field" style="margin-bottom:0"><label class="field__label">备注</label><textarea class="textarea" placeholder="资料现状、团队情况、特殊要求"></textarea></div>`,
+    okText: '创建并生成项目',
+    onOk: () => toast('客户已创建，项目流程已按模板生成'),
+  });
+
+  qi('#btnExport').onclick = () => toast('周报已生成，包含项目进度与协助响应时长');
+})();
+</script>
+</body>
+</html>

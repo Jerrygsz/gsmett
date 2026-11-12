@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · 贸智库 TradeMind｜企业 AI 服务交付平台</title>
+<meta name="description" content="贸智库 TradeMind — 把企业 AI 服务拆成可执行、可检查、可验收的交付步骤。">
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300867D'/%3E%3Cpath d='M9 9h5a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H9z' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linejoin='round'/%3E%3Cpath d='M23 9h-3a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H23z' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<div class="auth">
+
+  <!-- 品牌区 -->
+  <aside class="auth__aside">
+    <div class="auth__aside-inner">
+      <div class="auth__logo">
+        <span class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5.5h6a2.5 2.5 0 0 1 2.5 2.5v11a2 2 0 0 0-2-2H4z"/>
+            <path d="M20 5.5h-6A2.5 2.5 0 0 0 11.5 8v11a2 2 0 0 1 2-2H20z"/>
+          </svg>
+        </span>
+        <b>贸智库</b>
+        <span>TradeMind</span>
+      </div>
+
+      <div class="auth__hero" style="margin-top:52px">
+        <h2>企业 AI 不该是一个<br>买回来自己研究的<em>工具</em>。</h2>
+        <p>我们把服务拆成十个可执行的步骤：资料怎么准备、环境怎么检查、知识库怎么建、助手怎么配、做到什么程度算交付完成。每一步都有检查点，你能看到进度，也能看到依据。</p>
+      </div>
+
+      <div class="auth__flow">
+        <div class="auth__flow-item">
+          <span class="auth__flow-num">1</span>
+          <div class="auth__flow-txt">
+            <b>选择要解决的问题</b>
+            <span>知识库 / 销售助手 / 员工培训，按需要选，不打包强卖</span>
+          </div>
+        </div>
+        <div class="auth__flow-item">
+          <span class="auth__flow-num">2</span>
+          <div class="auth__flow-txt">
+            <b>按向导逐项完成</b>
+            <span>每步说明做什么、为什么做、怎么操作，能自动的自动完成</span>
+          </div>
+        </div>
+        <div class="auth__flow-item">
+          <span class="auth__flow-num">3</span>
+          <div class="auth__flow-txt">
+            <b>测试通过才算交付</b>
+            <span>50 道业务测试题，通过率到 85% 才进入验收</span>
+          </div>
+        </div>
+        <div class="auth__flow-item">
+          <span class="auth__flow-num">4</span>
+          <div class="auth__flow-txt">
+            <b>交付后继续维护</b>
+            <span>知识库更新、权限调整、使用情况回访，都在同一个工作空间</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="auth__foot">
+        贸智库 · 企业 AI 服务交付平台<br>
+        服务方：深圳市贸智库科技有限公司
+      </div>
+    </div>
+  </aside>
+
+  <!-- 表单区 -->
+  <main class="auth__form">
+    <div class="auth__box">
+      <h1 id="authTitle">登录你的企业工作空间</h1>
+      <p id="authSub">用企业邮箱登录，或使用下方演示账号直接体验完整流程。</p>
+
+      <div class="auth__tabs">
+        <button class="auth__tab is-active" data-tab="login">登录</button>
+        <button class="auth__tab" data-tab="reg">注册企业</button>
+      </div>
+
+      <!-- 登录 -->
+      <form id="formLogin" autocomplete="off">
+        <div class="field">
+          <label class="field__label" for="loginEmail">企业邮箱</label>
+          <input class="input" id="loginEmail" type="email" value="chen@hensen-tools.com" placeholder="name@company.com">
+        </div>
+        <div class="field">
+          <label class="field__label" for="loginPwd">密码</label>
+          <input class="input" id="loginPwd" type="password" value="demo2026" placeholder="••••••••">
+          <div class="field__hint" style="display:flex;justify-content:space-between">
+            <span>演示环境已预填，可直接登录</span>
+            <a href="#" style="color:var(--brand)">忘记密码</a>
+          </div>
+        </div>
+        <button class="btn btn--primary btn--lg btn--block" type="submit" style="margin-top:18px">
+          登录工作空间
+        </button>
+      </form>
+
+      <!-- 注册 -->
+      <form id="formReg" autocomplete="off" style="display:none">
+        <div class="field">
+          <label class="field__label" for="regOrg">企业名称</label>
+          <input class="input" id="regOrg" placeholder="营业执照上的全称" value="">
+        </div>
+        <div class="grid g2" style="gap:12px">
+          <div class="field">
+            <label class="field__label" for="regName">你的姓名</label>
+            <input class="input" id="regName" placeholder="真实姓名">
+          </div>
+          <div class="field">
+            <label class="field__label" for="regSize">企业规模</label>
+            <select class="select" id="regSize">
+              <option>1–10 人</option>
+              <option selected>11–50 人</option>
+              <option>51–200 人</option>
+              <option>200 人以上</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="regEmail">企业邮箱</label>
+          <input class="input" id="regEmail" type="email" placeholder="name@company.com">
+        </div>
+        <div class="field">
+          <label class="field__label" for="regPwd">设置密码</label>
+          <input class="input" id="regPwd" type="password" placeholder="至少 8 位，含字母与数字">
+        </div>
+        <div class="note note--brand" style="margin-top:4px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9.5"/><path d="M12 16v-4.5M12 8h.01"/></svg>
+          <span>注册后会先建立独立的企业工作空间，你在里面的资料、项目、成员都与其他企业相互隔离。</span>
+        </div>
+        <button class="btn btn--primary btn--lg btn--block" type="submit" style="margin-top:16px">
+          创建企业工作空间
+        </button>
+      </form>
+
+      <div class="auth__divider">或者</div>
+
+      <button class="btn btn--ghost btn--block" id="btnDemo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M6 3.5 20 12 6 20.5z"/></svg>
+        进入演示：恒森进出口（进行中项目）
+      </button>
+
+      <div class="demo-card">
+        <b>这是产品原型，不是正式环境</b>
+        所有数据保存在你本机浏览器，刷新不丢，可随时在设置里重置。演示企业已有一个进行到第 6 步的知识库项目，你可以直接往下走完整个交付流程。
+      </div>
+
+      <p class="auth__legal">
+        继续即表示同意 <a href="#">服务条款</a> 与 <a href="#">数据处理协议</a>。<br>
+        企业资料默认存储在企业自有环境，平台仅保存项目流程与状态信息。
+      </p>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/data.js"></script>
+<script>
+(function () {
+  const { qi, qa, toast } = TM;
+
+  /* 切换登录 / 注册 */
+  const titles = {
+    login: ['登录你的企业工作空间', '用企业邮箱登录，或使用下方演示账号直接体验完整流程。'],
+    reg: ['创建企业工作空间', '先建立独立空间，再选服务。资料、项目、成员都只对本企业可见。'],
+  };
+  qa('.auth__tab').forEach(tab => {
+    tab.onclick = () => {
+      qa('.auth__tab').forEach(t => t.classList.toggle('is-active', t === tab));
+      const k = tab.dataset.tab;
+      qi('#formLogin').style.display = k === 'login' ? '' : 'none';
+      qi('#formReg').style.display = k === 'reg' ? '' : 'none';
+      qi('#authTitle').textContent = titles[k][0];
+      qi('#authSub').textContent = titles[k][1];
+    };
+  });
+
+  function go(target) {
+    TM.load();
+    sessionStorage.setItem('tm_entered', '1');
+    location.href = target || 'app.html';
+  }
+
+  qi('#formLogin').onsubmit = (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true;
+    btn.textContent = '正在进入工作空间…';
+    setTimeout(() => go('app.html'), 520);
+  };
+
+  qi('#formReg').onsubmit = (e) => {
+    e.preventDefault();
+    const org = qi('#regOrg').value.trim();
+    const name = qi('#regName').value.trim();
+    const email = qi('#regEmail').value.trim();
+    const pwd = qi('#regPwd').value;
+    if (!org || !name || !email || !pwd) { toast('请把企业名称、姓名、邮箱和密码填完整', 'warn'); return; }
+    if (pwd.length < 8) { toast('密码至少 8 位', 'warn'); return; }
+
+    // 新注册企业：清空进度，从第 1 步开始
+    TM.reset();
+    const s = TM.load();
+    s.org.name = org;
+    s.org.short = org.replace(/^(深圳市|东莞市|广州市|佛山市|宁波市|厦门市|青岛市)/, '').slice(0, 8);
+    s.org.contact = name;
+    s.org.email = email;
+    s.user.name = name;
+    s.user.initial = name.slice(0, 1);
+    s.project.steps = {};
+    s.project.docs = [];
+    s.project.executed = {};
+    s.project.createdAt = TM.fmtDate(new Date());
+    TM.save();
+
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true;
+    btn.textContent = '正在创建工作空间…';
+    setTimeout(() => go('app.html'), 700);
+  };
+
+  qi('#btnDemo').onclick = () => {
+    const btn = qi('#btnDemo');
+    btn.disabled = true;
+    btn.textContent = '正在载入演示数据…';
+    setTimeout(() => go('app.html'), 420);
+  };
+})();
+</script>
+</body>
+</html>
