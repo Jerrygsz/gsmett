@@ -355,11 +355,11 @@
         why = '账号不是 <b>admin@maozhiku.com</b>。';
       } else if (pwdLen !== ADMIN_ACCOUNT.pwd.length) {
         // 最常见的坑：浏览器把已保存的旧密码自动填进了密码框
-        why = `密码框里现在是 <b>${pwdLen} 位</b>，演示密码是 <b>${ADMIN_ACCOUNT.pwd.length} 位</b>——多半是浏览器把以前存的密码自动填进来了。`;
+        why = `密码框里现在是 <b>${pwdLen} 位</b>，演示密码是 <b>${ADMIN_ACCOUNT.pwd.length} 位</b>——多半是浏览器自动填了旧密码。`;
       } else {
         why = '密码不对，注意大小写，演示密码是 <b>maozhiku2026</b>。';
       }
-      showLoginErr(`${why}<br>点<a class="lnk" id="lnkFill">这里一键填入演示账号</a>，或者点密码框右侧的眼睛看一下里面到底是什么。`);
+      showLoginErr(`${why}<br><a class="lnk" id="lnkFill">一键填入演示账号并登录</a>`);
       const lnk = qi('#lnkFill');
       if (lnk) lnk.onclick = fillDemo;
       return;
