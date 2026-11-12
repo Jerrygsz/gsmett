@@ -361,9 +361,9 @@
          <button class="btn btn--ghost btn--sm" id="btnAssist">${icon('help')} 申请人工协助</button>`)}
 
       <div class="row mb16" style="gap:12px">
-        <div class="bar" style="flex:1;height:7px"><div class="bar__fill" style="width:${p.pct}%"></div></div>
-        <span class="fs12 b6 tnum">${p.pct}%</span>
-        <span class="fs12 muted">${p.done} / ${p.total} 步已完成</span>
+        <div class="bar" id="pageBar" style="flex:1;height:7px"><div class="bar__fill" style="width:${p.pct}%"></div></div>
+        <span class="fs12 b6 tnum" id="pagePct">${p.pct}%</span>
+        <span class="fs12 muted" id="pageDone">${p.done} / ${p.total} 步已完成</span>
       </div>
 
       <div class="wizard">
@@ -459,12 +459,40 @@
             </ol>
           </div>
 
-          ${step.exec ? `
+          ${step.id === 3 ? `
+          <div class="step-block">
+            <div class="step-block__label">上传与分类</div>
+            ${st === 'locked'
+              ? `<div class="note note--warn">${icon('lock')}<span>完成第 2 步「电脑及环境检查」后即可上传资料。</span></div>`
+              : docManager()}
+          </div>` : ''}
+
+          ${step.id === 7 ? `
+          <div class="step-block">
+            <div class="step-block__label">测试工作台</div>
+            ${st === 'locked'
+              ? `<div class="note note--warn">${icon('lock')}<span>完成第 6 步「AI 助手创建」后即可生成测试题。</span></div>`
+              : testBench()}
+          </div>` : ''}
+
+          ${step.id === 1 ? `
+          <div class="step-block">
+            <div class="step-block__label">需要你操作</div>
+            ${companyForm()}
+          </div>` : ''}
+
+          ${step.id === 8 ? `
+          <div class="step-block">
+            <div class="step-block__label">需要你操作</div>
+            ${inviteBox()}
+          </div>` : ''}
+
+          ${step.exec && step.id !== 7 ? `
           <div class="step-block">
             <div class="step-block__label">自动执行</div>
             <div class="exec-box">
               <div class="exec-box__top">
-                <span class="exec-box__ico">${icon(step.role === '客户授权' ? 'key' : step.role === '双方测试' ? 'target' : 'zap')}</span>
+                <span class="exec-box__ico">${icon(step.role === '客户授权' ? 'key' : 'zap')}</span>
                 <div style="flex:1">
                   <b>${esc(step.exec.label)}</b>
                   <span>${esc(step.exec.desc)}</span>
@@ -474,16 +502,11 @@
                 </button>
               </div>
               <div class="console" id="console" style="display:${saved.executed ? 'block' : 'none'}">
-                ${saved.executed ? step.exec.logs.map(l => `<div><span class="ts">${'10:2' + Math.floor(Math.random() * 9)}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}</span><span class="${l[0]}">${esc(l[1])}</span></div>`).join('') : ''}
+                ${saved.executed ? buildLogs(step).map(l => `<div><span class="ts">${'10:2' + Math.floor(Math.random() * 9)}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}</span><span class="${l[0]}">${esc(l[1])}</span></div>`).join('') : ''}
               </div>
               ${!saved.executed && st !== 'locked' ? `<div class="fs11 muted mt8">执行前请确认：这一步只读取你在本步骤中提供的内容，不会访问其他文件。</div>` : ''}
             </div>
-          </div>` : `
-          <div class="step-block">
-            <div class="step-block__label">需要你操作</div>
-            ${step.id === 3 ? docUploader() : step.id === 1 ? companyForm() : step.id === 8 ? inviteBox() : `
-              <div class="note">${icon('info')}<span>这一步由你或你的团队在系统外完成，完成后勾选下方检查项即可。如需协助，点右上角「申请人工协助」。</span></div>`}
-          </div>`}
+          </div>` : ''}
 
           <div class="step-block">
             <div class="step-block__label" id="gateLabel">完成检查 · ${checkedCount}/${checkTotal}</div>
@@ -543,6 +566,21 @@
     if (hint) hint.innerHTML = all
       ? icon('checkCircle') + ' 已满足完成条件'
       : icon('info') + ' 请先完成上方检查项';
+
+    syncProgressUI();
+  }
+
+  /* 进度条 / 侧栏百分比跟随状态更新 */
+  function syncProgressUI() {
+    const p = TM.progress();
+    const fill = qi('#pageBar .bar__fill');
+    if (fill) fill.style.width = p.pct + '%';
+    const pct = qi('#pagePct');
+    if (pct) pct.textContent = p.pct + '%';
+    const done = qi('#pageDone');
+    if (done) done.textContent = `${p.done} / ${p.total} 步已完成`;
+    const nav = qi('#navProg');
+    if (nav) nav.textContent = p.pct + '%';
   }
 
   function bindStepEvents(step, st, saved) {
@@ -573,22 +611,10 @@
     const bp = qi('#btnPrev'); if (bp) bp.onclick = () => nav(step.id - 1);
     const bn = qi('#btnNext'); if (bn) bn.onclick = () => nav(step.id + 1);
 
-    // 资料上传
-    const up = qi('#btnUpload');
-    if (up) up.onclick = () => {
-      const mock = [
-        { n: '产品保修条款.pdf', c: '售后资料', s: '2.1 MB' },
-        { n: '客户投诉处理流程.docx', c: '售后资料', s: '180 KB' },
-      ][Math.floor(Math.random() * 2)];
-      const list = qi('#docList');
-      if (!list) return;
-      const row = TM.el('div', 'cfg-row', `
-        <span class="cfg-row__ico" style="background:var(--success-bg);color:var(--success)">${icon('fileText')}</span>
-        <div class="cfg-row__body"><b>${esc(mock.n)}</b><span>${esc(mock.c)} · ${mock.s} · 等待解析</span></div>
-        <span class="badge badge--warn">待处理</span>`);
-      list.appendChild(row);
-      toast(`已添加 ${mock.n}，解析后归入「${mock.c}」`);
-    };
+    // 第 3 步：资料上传与分类
+    if (step.id === 3) bindDocManager(step);
+    // 第 7 步：测试工作台
+    if (step.id === 7) bindTestBench(step);
 
     // 邀请
     const bi = qi('#btnInvite');
@@ -605,6 +631,43 @@
     });
   }
 
+  /* 第 3、4 步的日志跟着实际资料走，避免数字对不上 */
+  function buildLogs(step) {
+    const files = S.project.files || [];
+
+    if (step.id === 3) {
+      if (!files.length) return [['warn', '还没有添加任何资料，先上传再执行']];
+      const cats = new Set(files.map(f => f.cat)).size;
+      const ocr = files.filter(f => f.state === 'ocr').length;
+      const lines = files.slice(0, 4).map(f => ['ok', `${f.name} · ${f.size} · 文字可提取`]);
+      if (files.length > 4) lines.push(['dim', `其余 ${files.length - 4} 份资料已一并解析`]);
+      lines.push(['ok', `已生成资料清单 · 共 ${files.length} 份 / ${cats} 个分类`]);
+      if (ocr) lines.push(['warn', `${ocr} 份为扫描件，将在第 4 步自动 OCR 处理`]);
+      else lines.push(['dim', '未发现扫描件，全部可直接提取文字']);
+      return lines;
+    }
+
+    if (step.id === 4) {
+      const pages = files.reduce((a, f) => a + (f.pages || 0), 0);
+      const slices = files.reduce((a, f) => a + (f.slices || 0), 0);
+      const ocr = files.filter(f => f.state === 'ocr').length;
+      const lines = [
+        ['ok', '知识库「恒森产品与销售资料」已创建'],
+        ['ok', `文档解析完成 · ${files.length} 份 / ${pages || '—'} 页`],
+      ];
+      if (ocr) lines.push(['ok', `OCR 处理完成 · ${ocr} 份扫描件 · 识别率 96.2%`]);
+      lines.push(
+        ['ok', `文本切片完成 · ${slices.toLocaleString('en-US')} 个片段`],
+        ['ok', `向量化完成 · embedding ${slices.toLocaleString('en-US')} / ${slices.toLocaleString('en-US')}`],
+        ['ok', '索引构建完成 · 检索响应 240 ms'],
+        ['dim', '知识库已就绪，可进入模型配置'],
+      );
+      return lines;
+    }
+
+    return step.exec.logs;
+  }
+
   /* 模拟自动执行 */
   async function runExec(step, btn) {
     const con = qi('#console');
@@ -614,7 +677,7 @@
     con.innerHTML = '';
     btn.parentElement.parentElement.querySelector('.fs11.muted')?.remove();
 
-    for (const [type, text] of step.exec.logs) {
+    for (const [type, text] of buildLogs(step)) {
       const line = TM.el('div', '', `<span class="ts">${TM.fmtTime(new Date())}</span><span class="${type}">${esc(text)}</span>`);
       line.style.opacity = '0';
       line.style.transition = 'opacity .2s';
@@ -630,7 +693,7 @@
 
     btn.disabled = false;
     btn.innerHTML = icon('check') + ' 已执行';
-    const hasWarn = step.exec.logs.some(l => l[0] === 'warn');
+    const hasWarn = buildLogs(step).some(l => l[0] === 'warn');
     toast(hasWarn ? '执行完成，有 1 项需要关注' : '执行完成，检查项已自动核验', hasWarn ? 'warn' : 'success');
 
     // 自动勾选可由系统验证的检查项
@@ -684,23 +747,470 @@
     </div>`;
   }
 
-  function docUploader() {
-    return `<div class="stack" style="gap:9px" id="docList">
-      ${DOCS.map(d => `
-        <div class="cfg-row">
-          <span class="cfg-row__ico" style="background:var(--success-bg);color:var(--success)">${icon('fileText')}</span>
-          <div class="cfg-row__body">
-            <b>${esc(d.name)}</b>
-            <span>${esc(d.cat)} · ${d.size} · ${d.pages} 页 · ${d.slices} 个切片</span>
-          </div>
-          ${d.state === 'ocr' ? '<span class="badge badge--warn">已 OCR</span>' : '<span class="badge badge--success">已解析</span>'}
-          <button class="btn btn--quiet btn--sm" style="color:var(--text-3)" title="移除">${icon('x')}</button>
-        </div>`).join('')}
-    </div>
-    <div class="row mt12">
-      <button class="btn btn--ghost btn--sm" id="btnUpload">${icon('upload')} 添加资料</button>
-      <span class="fs11 muted">支持 PDF / Word / Excel / TXT / Markdown，单个不超过 200 MB</span>
+  /* ---------------------------------------------------------------------
+     第 3 步：资料上传与分类
+     --------------------------------------------------------------------- */
+  const MAX_BYTES = 200 * 1024 * 1024;
+  const ALLOW_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'md', 'csv'];
+
+  const fmtBytes = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+
+  function guessCat(name) {
+    const n = name.toLowerCase();
+    if (/售后|保修|退换|退货|投诉|质保/.test(n)) return '售后资料';
+    if (/sop|流程|审批|合同|制度|规范/.test(n)) return '业务流程';
+    if (/faq|常见|问答|销售|报价|话术|客户/.test(n)) return '销售资料';
+    return '产品资料';
+  }
+
+  function docManager() {
+    const files = S.project.files || [];
+    const total = files.reduce((a, f) => a + (f.bytes || 0), 0);
+
+    return `
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入资料文件">
+        <input type="file" id="fileInput" multiple hidden
+               accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.csv">
+        <span class="dropzone__ico">${icon('upload')}</span>
+        <b>把资料拖到这里，或点击选择文件</b>
+        <span class="dropzone__hint">PDF / Word / Excel / TXT / Markdown · 单份不超过 200 MB</span>
+        <span class="dropzone__privacy">${icon('shield')} 文件只在你本机读取文件名与大小，不会上传</span>
+      </div>
+
+      <div class="row--between mt16 mb8">
+        <div class="fs12 b5">已添加 <span id="docCount">${files.length}</span> 份 · 合计 <span id="docTotal">${fmtBytes(total)}</span></div>
+        <span class="fs11 muted">分类决定助手能检索到哪部分</span>
+      </div>
+
+      <div class="doc-list" id="docList">
+        ${files.length ? files.map(docRow).join('') : `<div class="empty" style="padding:26px 0">${icon('folder')}<p class="fs12">还没有添加资料。先上传产品目录和规格表，这两份决定回答的上限。</p></div>`}
+      </div>
+
+      <div class="coverage mt16">
+        ${TM.DOC_CATS.map(c => {
+          const n = files.filter(f => f.cat === c).length;
+          return `<div class="cov-item ${n ? 'is-ok' : ''}">
+            <span class="cov-item__dot"></span>
+            <span class="cov-item__name">${c}</span>
+            <span class="cov-item__n">${n ? n + ' 份' : '缺'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      ${files.length && !files.some(f => f.cat === '售后资料') ? `<div class="fs11 muted mt8">提示：售后政策缺失时，涉及退换货的问题会答不上来 —— 这正是第 7 步测试会暴露的问题。</div>` : ''}
+    `;
+  }
+
+  function docRow(d) {
+    return `<div class="doc-item" data-id="${esc(d.id)}">
+      <span class="doc-item__ext">${esc(d.ext || 'FILE')}</span>
+      <div class="doc-item__body">
+        <b>${esc(d.name)}</b>
+        <span>${esc(d.size)}${d.slices ? ' · 约 ' + d.slices + ' 个切片' : ''}${d.state === 'ocr' ? ' · 已 OCR' : ''}</span>
+      </div>
+      <select class="select select--sm" data-cat="${esc(d.id)}" aria-label="资料分类">
+        ${TM.DOC_CATS.map(c => `<option ${c === d.cat ? 'selected' : ''}>${c}</option>`).join('')}
+      </select>
+      <button class="btn btn--quiet btn--sm doc-item__del" data-del="${esc(d.id)}" title="移除这份资料">${icon('x')}</button>
     </div>`;
+  }
+
+  function bindDocManager(step) {
+    const dz = qi('#dropzone');
+    if (!dz) return;
+    const input = qi('#fileInput');
+
+    dz.onclick = () => input.click();
+    dz.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
+    input.onchange = () => { addFiles(input.files, step); input.value = ''; };
+    dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('is-over'); };
+    dz.ondragleave = () => dz.classList.remove('is-over');
+    dz.ondrop = (e) => {
+      e.preventDefault();
+      dz.classList.remove('is-over');
+      addFiles(e.dataTransfer.files, step);
+    };
+
+    qa('[data-cat]').forEach(sel => sel.onchange = () => {
+      const f = (S.project.files || []).find(x => x.id === sel.dataset.cat);
+      if (!f) return;
+      f.cat = sel.value;
+      TM.save();
+      syncDocChecks(step);
+      toast(`已归入「${sel.value}」`);
+      refreshGate(step, TM.stepState(step.id));
+    });
+
+    qa('[data-del]').forEach(btn => btn.onclick = () => {
+      const id = btn.dataset.del;
+      const f = (S.project.files || []).find(x => x.id === id);
+      if (!f) return;
+      S.project.files = S.project.files.filter(x => x.id !== id);
+      TM.save();
+      const reverted = syncDocChecks(step);
+      if (reverted) {
+        toast('资料变更，第 3 步需要重新确认', 'warn');
+        router();
+      } else {
+        renderStepPanel();
+        toast(`已移除 ${f.name}`, 'info');
+      }
+    });
+  }
+
+  function addFiles(list, step) {
+    if (!list || !list.length) return;
+    const files = S.project.files || (S.project.files = []);
+    let added = 0, skipped = 0, tooBig = 0, dup = 0;
+
+    Array.from(list).forEach(file => {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      if (!ALLOW_EXT.includes(ext)) { skipped++; return; }
+      if (file.size > MAX_BYTES) { tooBig++; return; }
+      if (files.some(f => f.name === file.name)) { dup++; return; }
+
+      files.push({
+        id: 'f' + Date.now() + Math.floor(Math.random() * 999),
+        name: file.name,
+        ext: ext.toUpperCase().slice(0, 4),
+        cat: guessCat(file.name),
+        bytes: file.size,
+        size: fmtBytes(file.size),
+        slices: Math.max(8, Math.round(file.size / 26700)),
+        state: 'ok',
+      });
+      added++;
+    });
+
+    if (added) {
+      TM.save();
+      syncDocChecks(step);
+      renderStepPanel();
+      toast(`已添加 ${added} 份资料${dup ? `，${dup} 份重复已跳过` : ''}`);
+    } else if (dup) {
+      toast(`${dup} 份文件已在列表中`, 'warn');
+    } else if (tooBig) {
+      toast(`${tooBig} 份超过 200 MB，请拆分后再上传`, 'warn');
+    } else if (skipped) {
+      toast('暂不支持这种格式，请转成 PDF 或 Word', 'warn');
+    }
+  }
+
+  /* 资料分类 → 自动核验检查项 */
+  function syncDocChecks(step) {
+    if (!step || step.id !== 3) return;
+    const files = S.project.files || [];
+    const has = c => files.some(f => f.cat === c);
+    let reverted = false;
+    if (setCheck(step, 'c1', has('产品资料'))) reverted = true;
+    if (setCheck(step, 'c2', has('业务流程') || has('销售资料'))) reverted = true;
+    if (setCheck(step, 'c3', files.length > 0)) reverted = true;
+    return reverted;
+  }
+
+  /* ---------------------------------------------------------------------
+     第 7 步：测试工作台
+     --------------------------------------------------------------------- */
+  let testFilter = 'key';   // key | all
+
+  function testStats() {
+    const run = S.project.testRun;
+    const Q = TM.TEST_QUESTIONS;
+    const marks = run.marks || {};
+    let pass = 0, fix = 0, gap = 0;
+    Q.forEach(q => {
+      const m = marks[q.id] || q.r;
+      if (m === 'pass') pass++;
+      else if (m === 'fix') fix++;
+      else gap++;
+    });
+    const keyTotal = Q.filter(q => q.key).length;
+    const keyDone = Q.filter(q => q.key && marks[q.id]).length;
+    return {
+      ran: !!run.ran,
+      pass, fix, gap,
+      rate: Math.round(pass / Q.length * 100),
+      keyTotal, keyDone,
+      total: Q.length,
+    };
+  }
+
+  function testStatsHTML() {
+    const s = testStats();
+    if (!s.ran) {
+      return `<div class="test-stats">
+        <div class="test-stats__i"><b>${s.total}</b><span>题目</span></div>
+        <div class="test-stats__i"><b>—</b><span>通过</span></div>
+        <div class="test-stats__i"><b>—</b><span>需修改</span></div>
+        <div class="test-stats__i"><b>—</b><span>资料不足</span></div>
+        <div class="test-stats__i" style="margin-left:auto"><b style="font-size:13px;color:var(--text-3)">待运行</b><span>状态</span></div>
+      </div>`;
+    }
+    return `<div class="test-stats">
+      <div class="test-stats__i"><b>${s.total}</b><span>题目</span></div>
+      <div class="test-stats__i"><b>${s.keyDone}/${s.keyTotal}</b><span>关键题已核对</span></div>
+      <div class="test-stats__i test-stats__i--pass"><b>${s.pass}</b><span>通过</span></div>
+      <div class="test-stats__i test-stats__i--fix"><b>${s.fix}</b><span>需修改</span></div>
+      <div class="test-stats__i test-stats__i--gap"><b>${s.gap}</b><span>资料不足</span></div>
+      <div class="test-stats__i test-stats__i--rate"><b>${s.rate}%</b><span>${s.keyDone === s.keyTotal ? '通过率' : '预计通过率'}</span></div>
+    </div>`;
+  }
+
+  function testBench() {
+    const run = S.project.testRun;
+    const Q = TM.TEST_QUESTIONS;
+
+    if (!run.generated) {
+      return `<div class="test-empty">
+        <span class="test-empty__ico">${icon('target')}</span>
+        <b>还没有生成测试题</b>
+        <p>系统会按资料内容出 ${Q.length} 道题：产品 ${Q.filter(q => q.cat === '产品知识').length} / 销售 ${Q.filter(q => q.cat === '销售流程').length} / 邮件 ${Q.filter(q => q.cat === '邮件任务').length} / 安全 ${Q.filter(q => q.cat === '安全边界').length}。生成后先批量运行，再由你抽检 ${Q.filter(q => q.key).length} 道关键题。</p>
+        <button class="btn btn--primary" id="btnGenTest">${icon('zap')} 生成 ${Q.length} 道测试题</button>
+        <span class="fs11 muted mt8">生成后不会自动运行，你可以先看一眼题目是否贴合业务</span>
+      </div>`;
+    }
+
+    const s = testStats();
+    const list = testFilter === 'all' ? Q : Q.filter(q => q.key);
+    const marks = run.marks || {};
+
+    return `
+      <div id="testStatsWrap">${testStatsHTML()}</div>
+
+      ${!run.ran ? `
+        <div class="test-runbar" id="testRunBarWrap">
+          <div class="row--between mb8">
+            <span class="fs12 dim">题目已生成，等待批量运行</span>
+            <button class="btn btn--primary btn--sm" id="btnRunBatch">${icon('play')} 批量运行 ${Q.length} 题</button>
+          </div>
+          <div class="bar mb8" style="display:none" id="testRunBarBox"><div class="bar__fill" id="testRunBar" style="width:0%"></div></div>
+          <div class="fs11 muted" id="testRunPct" style="display:none">0 / ${Q.length}</div>
+        </div>` : `
+        <div class="test-runbar test-runbar--done">
+          <span class="row" style="gap:7px;color:var(--success)">${icon('checkCircle')}<span class="fs12 b5">${Q.length} 题已运行</span></span>
+          <span class="fs11 muted">运行于 ${esc(run.at || '—')} · 平均单题 2.1 s</span>
+          <div style="flex:1"></div>
+          <button class="btn btn--quiet btn--sm" id="btnRerunBatch">${icon('refresh')} 重新运行</button>
+        </div>`}
+
+      <div class="row mt16 mb12" style="gap:6px">
+        <button class="chip ${testFilter === 'key' ? 'is-on' : ''}" data-filter="key">关键题 ${Q.filter(q => q.key).length}</button>
+        <button class="chip ${testFilter === 'all' ? 'is-on' : ''}" data-filter="all">全部 ${Q.length}</button>
+        <div style="flex:1"></div>
+        <span class="fs11 muted">${run.ran ? '点判定按钮可改判，统计会实时更新' : ''}</span>
+      </div>
+
+      <div class="tq-list">
+        ${list.map(q => testRow(q, run, marks)).join('')}
+      </div>
+
+      <div class="test-foot">
+        ${run.ran
+          ? `<div class="fs12 ${s.keyDone === s.keyTotal ? 'dim' : 'muted'}">
+               ${s.keyDone === s.keyTotal
+                 ? `关键题已全部核对 · 通过率 <b style="color:${s.rate >= 85 ? 'var(--success)' : 'var(--warn)'}">${s.rate}%</b>（验收线 85%）`
+                 : `还有 ${s.keyTotal - s.keyDone} 道关键题待核对`}
+             </div>
+             <div style="flex:1"></div>
+             ${S.project.report
+               ? `<a class="btn btn--ghost btn--sm" href="#test">${icon('fileText')} 查看测试报告</a>`
+               : `<button class="btn btn--primary btn--sm" id="btnMakeReport" ${s.keyDone === s.keyTotal ? '' : 'disabled'}>${icon('fileText')} 生成测试报告</button>`}`
+          : `<span class="fs11 muted">先批量运行，再核对关键题</span>`}
+      </div>
+    `;
+  }
+
+  function testRow(q, run, marks) {
+    const m = marks[q.id] || (run.ran ? q.r : '');
+    const isKey = q.key;
+    const markCls = m === 'pass' ? 'is-pass' : m === 'fix' ? 'is-fix' : m === 'gap' ? 'is-gap' : '';
+
+    return `<div class="tq ${run.ran ? '' : 'tq--pending'}" data-q="${q.id}">
+      <div class="tq__head">
+        <span class="tq__no">${String(q.id).padStart(2, '0')}</span>
+        <span class="tag tag--outline">${esc(q.cat)}</span>
+        ${isKey ? `<span class="badge badge--warn">关键</span>` : ''}
+        <div style="flex:1"></div>
+        ${run.ran
+          ? `<span class="badge ${m === 'pass' ? 'badge--success' : m === 'fix' ? 'badge--warn' : 'badge--danger'}" data-qbadge>${m === 'pass' ? '通过' : m === 'fix' ? '需修改' : '资料不足'}</span>`
+          : `<span class="badge">待运行</span>`}
+      </div>
+      <div class="tq__q">${esc(q.q)}</div>
+      ${run.ran ? `
+        <div class="tq__a">
+          <span class="tq__a-label">AI 回答</span>
+          <span>${esc(q.a)}</span>
+          ${q.cite !== '—' ? `<span class="tq__cite">${icon('file')}${esc(q.cite)}</span>` : `<span class="tq__cite tq__cite--none">${icon('alert')}无出处</span>`}
+        </div>
+        <div class="tq__marks">
+          <button class="mark-btn ${m === 'pass' ? 'is-on is-pass' : ''}" data-mark="pass" data-qid="${q.id}">${icon('check')} 通过</button>
+          <button class="mark-btn ${m === 'fix' ? 'is-on is-fix' : ''}" data-mark="fix" data-qid="${q.id}">${icon('edit')} 需修改</button>
+          <button class="mark-btn ${m === 'gap' ? 'is-on is-gap' : ''}" data-mark="gap" data-qid="${q.id}">${icon('help')} 资料不足</button>
+        </div>` : ''}
+    </div>`;
+  }
+
+  function bindTestBench(step) {
+    const Q = TM.TEST_QUESTIONS;
+
+    const bg = qi('#btnGenTest');
+    if (bg) bg.onclick = () => {
+      S.project.testRun = { generated: true, ran: false, at: null, marks: {} };
+      TM.save();
+      renderStepPanel();
+      toast(`已生成 ${Q.length} 道测试题，先看一遍再运行`);
+    };
+
+    qa('[data-filter]').forEach(c => c.onclick = () => {
+      testFilter = c.dataset.filter;
+      renderStepPanel();
+    });
+
+    const br = qi('#btnRunBatch') || qi('#btnRerunBatch');
+    if (br) br.onclick = () => runBatch(step, br);
+
+    qa('[data-mark]').forEach(b => b.onclick = () => {
+      const qid = +b.dataset.qid;
+      const mark = b.dataset.mark;
+      const run = S.project.testRun;
+      // 再点一次同一判定 = 取消，回落到系统判定
+      if (run.marks[qid] === mark) delete run.marks[qid];
+      else run.marks[qid] = mark;
+      TM.save();
+
+      // 局部刷新该行
+      const row = qi(`.tq[data-q="${qid}"]`);
+      if (row) {
+        qa('.mark-btn', row).forEach(x => {
+          x.classList.toggle('is-on', x.dataset.mark === run.marks[qid]);
+        });
+        const badge = qi('[data-qbadge]', row);
+        const q = Q.find(x => x.id === qid);
+        const eff = run.marks[qid] || q.r;
+        if (badge) {
+          badge.className = 'badge ' + (eff === 'pass' ? 'badge--success' : eff === 'fix' ? 'badge--warn' : 'badge--danger');
+          badge.textContent = eff === 'pass' ? '通过' : eff === 'fix' ? '需修改' : '资料不足';
+        }
+      }
+
+      // 局部刷新统计与底部
+      const wrap = qi('#testStatsWrap');
+      if (wrap) wrap.innerHTML = testStatsHTML();
+      refreshTestFoot(step);
+      syncTestChecks(step);
+    });
+
+    const bm = qi('#btnMakeReport');
+    if (bm) bm.onclick = () => {
+      const s = testStats();
+      S.project.report = {
+        at: TM.fmtDate(new Date()),
+        rate: s.rate, pass: s.pass, fix: s.fix, gap: s.gap,
+        keyDone: s.keyDone,
+      };
+      TM.save();
+      toast(`测试报告已生成 · 通过率 ${s.rate}%`);
+      renderStepPanel();
+    };
+
+    const rr = qi('#btnRerunBatch');
+    if (rr) rr.onclick = () => runBatch(step, rr);
+  }
+
+  function refreshTestFoot(step) {
+    const s = testStats();
+    const foot = qi('.test-foot');
+    if (!foot) return;
+    if (S.project.report) {
+      foot.innerHTML = `<div class="fs12 dim">报告已生成 · 通过率 <b>${S.project.report.rate}%</b></div>
+        <div style="flex:1"></div>
+        <a class="btn btn--ghost btn--sm" href="#test">${icon('fileText')} 查看测试报告</a>`;
+      return;
+    }
+    const ok = s.keyDone === s.keyTotal;
+    foot.innerHTML = `<div class="fs12 ${ok ? 'dim' : 'muted'}">${ok
+      ? `关键题已全部核对 · 通过率 <b style="color:${s.rate >= 85 ? 'var(--success)' : 'var(--warn)'}">${s.rate}%</b>（验收线 85%）`
+      : `还有 ${s.keyTotal - s.keyDone} 道关键题待核对`}</div>
+      <div style="flex:1"></div>
+      <button class="btn btn--primary btn--sm" id="btnMakeReport" ${ok ? '' : 'disabled'}>${icon('fileText')} 生成测试报告</button>`;
+    const bm = qi('#btnMakeReport');
+    if (bm) bm.onclick = () => {
+      const st = testStats();
+      S.project.report = { at: TM.fmtDate(new Date()), rate: st.rate, pass: st.pass, fix: st.fix, gap: st.gap, keyDone: st.keyDone };
+      TM.save();
+      toast(`测试报告已生成 · 通过率 ${st.rate}%`);
+      renderStepPanel();
+    };
+  }
+
+  async function runBatch(step, btn) {
+    const Q = TM.TEST_QUESTIONS;
+    const run = S.project.testRun;
+    run.marks = run.marks || {};
+
+    btn.disabled = true;
+    btn.innerHTML = icon('refresh') + ' 运行中…';
+
+    let barBox = qi('#testRunBarBox'), bar = qi('#testRunBar'), pct = qi('#testRunPct');
+    if (!barBox) {
+      // 重新运行时把进度条插到 runbar 里
+      const wrap = qi('.test-runbar');
+      if (wrap) {
+        wrap.insertAdjacentHTML('beforeend', `<div class="bar mb8" style="margin-top:10px" id="testRunBarBox"><div class="bar__fill" id="testRunBar" style="width:0%"></div></div><div class="fs11 muted" id="testRunPct">0 / ${Q.length}</div>`);
+        barBox = qi('#testRunBarBox'); bar = qi('#testRunBar'); pct = qi('#testRunPct');
+      }
+    }
+    if (barBox) barBox.style.display = 'block';
+    if (pct) pct.style.display = 'block';
+
+    for (let i = 0; i < Q.length; i++) {
+      await sleep(30);
+      if (i % 5 === 0 || i === Q.length - 1) {
+        const p = Math.round((i + 1) / Q.length * 100);
+        if (bar) bar.style.width = p + '%';
+        if (pct) pct.textContent = `${i + 1} / ${Q.length} · 正在运行 ${Q[i].cat}`;
+      }
+    }
+
+    run.ran = true;
+    run.at = TM.fmtDate(new Date()) + ' ' + TM.fmtTime(new Date()).slice(0, 5);
+    TM.save();
+    renderStepPanel();
+    toast(`${Q.length} 题运行完成，请核对关键题`);
+  }
+
+  function syncTestChecks(step) {
+    if (!step || step.id !== 7) return;
+    const s = testStats();
+    let reverted = false;
+    if (setCheck(step, 'c1', s.ran)) reverted = true;
+    if (setCheck(step, 'c2', s.keyDone === s.keyTotal)) reverted = true;
+    if (setCheck(step, 'c3', s.ran && s.rate >= 85)) reverted = true;
+    refreshGate(step, TM.stepState(step.id));
+    if (reverted) {
+      toast('测试结果变更，第 7 步需要重新确认', 'warn');
+      router();
+    }
+  }
+
+  /* 检查项统一设置：同时改状态与 DOM */
+  function setCheck(step, checkId, on) {
+    const saved = TM.stepState(step.id);
+    const i = saved.checks.indexOf(checkId);
+    if (on && i < 0) saved.checks.push(checkId);
+    if (!on && i >= 0) saved.checks.splice(i, 1);
+
+    // 已完成的步骤，如果检查项不再满足，退回进行中状态
+    let reverted = false;
+    if (!on && saved.done) {
+      saved.done = false;
+      saved.at = null;
+      reverted = true;
+    }
+
+    TM.save();
+    const box = qi(`.checkline[data-check="${checkId}"]`);
+    if (box) box.classList.toggle('is-checked', on);
+    return reverted;
   }
 
   function inviteBox() {
@@ -916,9 +1426,14 @@
   }
 
   function cfgDocs() {
+    const files = S.project.files || [];
+    const totalBytes = files.reduce((a, f) => a + (f.bytes || 0), 0);
+    const totalMB = (totalBytes / 1048576).toFixed(1);
+    const cats = new Set(files.map(f => f.cat)).size;
+
     return `
       <div class="row--between mb16">
-        <span class="fs12 muted">共 ${DOCS.length} 份资料 · 3 个分类 · 合计 23.1 MB</span>
+        <span class="fs12 muted">共 ${files.length} 份资料 · ${cats} 个分类 · 合计 ${totalMB} MB</span>
         <div class="row" style="gap:8px">
           <button class="btn btn--ghost btn--sm">${icon('filter')} 按分类筛选</button>
           <button class="btn btn--primary btn--sm" data-act="upload">${icon('upload')} 上传资料</button>
@@ -928,7 +1443,7 @@
         <table class="table">
           <thead><tr><th>文件名</th><th style="width:120px">分类</th><th style="width:90px">大小</th><th style="width:90px">切片</th><th style="width:100px">解析状态</th><th style="width:70px"></th></tr></thead>
           <tbody>
-            ${DOCS.map(d => `
+            ${files.length ? files.map(d => `
               <tr>
                 <td>
                   <div class="row" style="gap:9px">
@@ -938,10 +1453,10 @@
                 </td>
                 <td><span class="tag tag--outline">${esc(d.cat)}</span></td>
                 <td class="fs12 muted tnum">${esc(d.size)}</td>
-                <td class="fs12 tnum">${d.slices}</td>
+                <td class="fs12 tnum">${d.slices || '—'}</td>
                 <td>${d.state === 'ocr' ? '<span class="badge badge--warn">OCR 识别</span>' : '<span class="badge badge--success">已索引</span>'}</td>
                 <td><button class="btn btn--quiet btn--sm" style="padding:0 4px">${icon('more')}</button></td>
-              </tr>`).join('')}
+              </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-3);font-size:12.5px">还没有资料。到项目向导第 3 步上传。</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1188,6 +1703,7 @@
     const report = S.project.report;
 
     if (!report) {
+      const ran = S.project.testRun && S.project.testRun.ran;
       root.innerHTML = `<div class="page page--narrow">
         ${pageHead('测试与验收', '「知识库建好了」和「知识库能用」是两件事。这一步用 50 道题把它们区分开。',
           `<span class="badge badge--warn badge--dot">尚未测试</span>`)}
@@ -1195,10 +1711,12 @@
         <div class="card card--pad mb20" style="display:flex;gap:22px;align-items:center">
           <span class="ico-lg" style="width:52px;height:52px;border-radius:14px;background:var(--brand-50);color:var(--brand);display:grid;place-items:center;flex:0 0 52px">${icon('target')}</span>
           <div style="flex:1">
-            <div class="fs15 b6 mb4">项目已具备测试条件</div>
-            <p class="fs12 muted" style="line-height:1.65">知识库已构建（1,284 个切片），3 个助手已挂载。现在可以生成测试题并运行。整个过程约 3 分钟，不需要你在场。</p>
+            <div class="fs15 b6 mb4">${ran ? '测试已运行，报告还没有生成' : '项目已具备测试条件'}</div>
+            <p class="fs12 muted" style="line-height:1.65">${ran
+              ? `50 道题已经跑完，还差核对关键题并生成报告这一步。`
+              : '知识库已构建（1,284 个切片），3 个助手已挂载。到项目向导第 7 步生成测试题、批量运行，再抽检 10 道关键题。'}</p>
           </div>
-          <button class="btn btn--primary btn--lg" id="btnRunTest">${icon('play')} 生成并运行测试</button>
+          <a class="btn btn--primary btn--lg" href="#wizard/7">${icon('arrowRight')} ${ran ? '去生成报告' : '到第 7 步开始测试'}</a>
         </div>
 
         ${sectionHead('四类测试', '共 50 题 · 覆盖真实业务场景')}
@@ -1229,11 +1747,18 @@
         <div class="note note--warn mt16">${icon('alert')}<span>注意：不能只看回答是否流畅。真正要检查的是资料来源是否准确、权限是否隔离、无答案时是否会明确说「不知道」。</span></div>
       </div>`;
 
-      qi('#btnRunTest').onclick = runTests;
       return;
     }
 
     /* ---- 有报告 ---- */
+    const totalQ = TM.TEST_QUESTIONS.length;
+    const marks = (S.project.testRun && S.project.testRun.marks) || {};
+    const issues = TM.TEST_QUESTIONS
+      .map(q => ({ ...q, m: marks[q.id] || q.r }))
+      .filter(q => q.m !== 'pass');
+    const fixN = issues.filter(q => q.m === 'fix').length;
+    const gapN = issues.filter(q => q.m === 'gap').length;
+
     root.innerHTML = `<div class="page page--narrow">
       ${pageHead('测试与验收', '报告已生成，可下载归档。待整改项完成后重新运行一次即可更新。',
         `<button class="btn btn--ghost btn--sm" id="btnDownload">${icon('download')} 下载报告</button>
@@ -1243,47 +1768,43 @@
         <div class="report-hero__main">
           <div class="report-hero__tag">
             <span class="badge badge--brand badge--dot">测试已完成</span>
-            <span class="fs11 muted">2026-11-12 15:08 · 共 50 题 · 耗时 3 分 12 秒</span>
+            <span class="fs11 muted">${esc(report.at)} · 共 ${totalQ} 题 · 关键题 ${esc(String(report.keyDone || 12))} 道已人工核对</span>
           </div>
           <h2>企业 AI 知识库测试报告</h2>
-          <p>通过率 <b style="color:var(--text)">86%</b>，高于 85% 的验收线。有 5 题需要修改，集中在售后政策与包装规格；2 题因资料不足无法回答，建议补充欧盟认证与 EPR 相关资料后重新测试。</p>
+          <p>通过率 <b style="color:var(--text)">${report.rate}%</b>，${report.rate >= 85 ? '高于' : '低于'} 85% 的验收线。有 ${fixN} 题需要修改${gapN ? `，${gapN} 题因资料不足无法回答` : ''}。${gapN ? '建议补充相关资料后重新测试。' : ''}</p>
           <div class="stat-mini">
-            <div class="stat-mini__i"><b class="tnum">50</b><span>测试题总数</span></div>
-            <div class="stat-mini__i stat-mini__i--ok"><b class="tnum">43</b><span>符合预期</span></div>
-            <div class="stat-mini__i stat-mini__i--fix"><b class="tnum">5</b><span>需要修改</span></div>
-            <div class="stat-mini__i stat-mini__i--gap"><b class="tnum">2</b><span>资料不足</span></div>
+            <div class="stat-mini__i"><b class="tnum">${totalQ}</b><span>测试题总数</span></div>
+            <div class="stat-mini__i stat-mini__i--ok"><b class="tnum">${report.pass}</b><span>符合预期</span></div>
+            <div class="stat-mini__i stat-mini__i--fix"><b class="tnum">${report.fix}</b><span>需要修改</span></div>
+            <div class="stat-mini__i stat-mini__i--gap"><b class="tnum">${report.gap}</b><span>资料不足</span></div>
           </div>
         </div>
         <div class="ring" style="flex:0 0 auto">
-          ${ringSVG(86, 116, 9)}
-          <div class="ring__txt"><b>86%</b><span>通过率</span></div>
+          ${ringSVG(report.rate, 116, 9)}
+          <div class="ring__txt"><b>${report.rate}%</b><span>通过率</span></div>
         </div>
       </div>
 
-      <div class="note note--brand mb20">${icon('info')}<span><b>建议：</b>补充「欧盟认证」与「EPR 注册」相关资料，修正 5 个包装规格与售后运费的回答后重新测试。这 7 项归入待整改清单，约定 3 个工作日内完成。</span></div>
+      <div class="note note--brand mb20">${icon('info')}<span><b>建议：</b>${gapN
+        ? `补充缺失的资料（认证、EPR、配件型号等），修正 ${fixN} 个回答后重新测试。`
+        : `修正 ${fixN} 个不准确的回答后重新测试。`}这些项归入待整改清单，约定 3 个工作日内完成。</span></div>
 
-      ${sectionHead('测试明细', '按问题类型查看', `<a class="btn btn--quiet btn--sm" href="#wizard/7">回到第 7 步 ${icon('chevronRight')}</a>`)}
+      ${sectionHead('待整改清单', `${issues.length} 项`, `<a class="btn btn--quiet btn--sm" href="#wizard/7">回到第 7 步 ${icon('chevronRight')}</a>`)}
       <div class="card" style="overflow:hidden">
-        <div class="row" style="gap:6px;padding:11px 14px;border-bottom:1px solid var(--border);background:var(--surface-2)">
-          ${['全部 50', '通过 43', '需修改 5', '资料不足 2'].map((t, i) => `<button class="chip" style="${i === 0 ? 'border-color:var(--brand);color:var(--brand-700);background:var(--brand-50)' : ''}">${t}</button>`).join('')}
-        </div>
-        ${TESTS.map(t => `
+        ${issues.length ? issues.map(t => `
           <div class="test-row">
-            <span style="flex:0 0 auto;margin-top:1px;color:${t.r === 'pass' ? 'var(--success)' : t.r === 'fix' ? 'var(--warn)' : 'var(--text-4)'}">
-              ${icon(t.r === 'pass' ? 'checkCircle' : t.r === 'fix' ? 'alert' : 'help')}
+            <span style="flex:0 0 auto;margin-top:1px;color:${t.m === 'fix' ? 'var(--warn)' : 'var(--text-4)'}">
+              ${icon(t.m === 'fix' ? 'alert' : 'help')}
             </span>
             <div class="test-row__q">
               <b>${esc(t.q)}</b>
-              <span class="fs11 muted">回答：${esc(t.a)}</span>
+              <span class="fs11 muted">${esc(t.a)}</span>
             </div>
             <div class="test-row__a">
-              <span class="badge ${t.r === 'pass' ? 'badge--success' : t.r === 'fix' ? 'badge--warn' : ''}">${t.r === 'pass' ? '通过' : t.r === 'fix' ? '需修改' : '资料不足'}</span>
+              <span class="badge ${t.m === 'fix' ? 'badge--warn' : ''}">${t.m === 'fix' ? '需修改' : '资料不足'}</span>
               <div class="fs11 muted mt4" style="text-align:right">${esc(t.cat)}</div>
             </div>
-          </div>`).join('')}
-        <div style="padding:12px 14px;border-top:1px solid var(--border);text-align:center">
-          <button class="btn btn--quiet btn--sm">查看全部 50 道题 ${icon('chevronDown')}</button>
-        </div>
+          </div>`).join('') : `<div class="empty">${icon('checkCircle')}<p>全部 ${totalQ} 题通过，无需整改。</p></div>`}
       </div>
 
       ${sectionHead('验收', '第 9 步 · 双方确认')}
@@ -1324,46 +1845,6 @@
       onOk: () => { toast('已确认验收，进入第 10 步正式交付'); setTimeout(() => go('wizard', '10'), 700); },
     });
     qi('#btnAssist2').onclick = openAssist;
-  }
-
-  async function runTests() {
-    const btn = qi('#btnRunTest');
-    btn.disabled = true;
-    btn.innerHTML = icon('refresh') + ' 正在生成测试题…';
-
-    const box = TM.el('div', 'card card--pad mt20');
-    box.innerHTML = `<div class="row--between mb12"><b class="fs13">测试执行中</b><span class="fs11 muted" id="testPct">0%</span></div>
-      <div class="bar mb12"><div class="bar__fill" id="testBar" style="width:0%"></div></div>
-      <div class="console" id="testLog" style="max-height:150px"></div>`;
-    btn.parentElement.after(box);
-
-    const logs = [
-      ['ok', '已生成 50 道测试题 · 产品 24 / 销售 14 / 邮件 8 / 安全 4'],
-      ['ok', '知识库检索正常 · 平均召回 4.2 个片段'],
-      ['ok', '产品知识测试 24 题 · 通过 21 · 需修改 2 · 资料不足 1'],
-      ['ok', '销售流程测试 14 题 · 通过 13 · 需修改 1'],
-      ['ok', '邮件任务测试 8 题 · 通过 7 · 需修改 1'],
-      ['ok', '安全边界测试 4 题 · 全部拒绝越权请求'],
-      ['warn', '汇总：通过 43 · 需修改 5 · 资料不足 2'],
-      ['dim', '通过率 86% · 达到验收线 85%'],
-    ];
-    const con = qi('#testLog');
-    for (let i = 0; i < logs.length; i++) {
-      const [t, txt] = logs[i];
-      const line = TM.el('div', '', `<span class="ts">${TM.fmtTime(new Date())}</span><span class="${t}">${esc(txt)}</span>`);
-      con.appendChild(line);
-      con.scrollTop = con.scrollHeight;
-      const pct = Math.round(((i + 1) / logs.length) * 100);
-      qi('#testBar').style.width = pct + '%';
-      qi('#testPct').textContent = pct + '%';
-      await sleep(480);
-    }
-    await sleep(500);
-    S.project.report = { at: TM.fmtDate(new Date()), rate: 86 };
-    TM.save();
-    toast('测试完成 · 通过率 86%');
-    // 直接重渲染当前视图（hash 未变化时不会触发 hashchange）
-    ROUTES.test.render(view);
   }
 
   /* =====================================================================
