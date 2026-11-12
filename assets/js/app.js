@@ -793,6 +793,9 @@
         ].filter(Boolean).join(' · ')
       : '当前离线';
 
+    // 往返超过 1 秒，导入资料会明显变慢，算需要处理
+    const netDown = !online || (realRtt !== null && realRtt > 1000) || (realRtt === null && c.rtt > 800);
+
     const cores = navigator.hardwareConcurrency || 0;
 
     const web = [
@@ -800,7 +803,7 @@
       { k: 'browser', label: '浏览器', value: brVal, state: 'ok', need: '用于访问本平台' },
       { k: 'cores', label: '逻辑处理器', value: cores ? cores + ' 个核心' : '浏览器未提供', state: cores >= 4 ? 'ok' : 'warn', need: '建议 4 核以上' },
       { k: 'mem', label: '设备内存', value: memVal, state: memState, need: '建议 8 GB 以上' },
-      { k: 'net', label: '网络状态', value: netVal, state: online && !slow ? 'ok' : 'warn', need: '需要联网' },
+      { k: 'net', label: '网络状态', value: netVal, state: netDown ? 'warn' : 'ok', need: '需要联网' },
       { k: 'store', label: '网页存储配额', value: stVal, state: 'info', need: '参考值' },
     ];
 
@@ -902,7 +905,7 @@
       ${icon(warns.length ? 'alert' : 'checkCircle')}
       <div>
         <b>浏览器侧 6 项已读取 · ${okN} 项达标${warns.length ? ` · ${warns.length} 项需注意` : ''}${infoN ? ` · ${infoN} 项参考值` : ''}</b>
-        <span>${warns.length ? tip : '这台机器的系统与网络满足运行要求。'}本地 4 项尚未检测，需要安装本地助手或你人工确认。</span>
+        <span>${warns.length ? tip : '系统与网络均已读取，未见阻塞项。'}本地 4 项尚未检测，需要安装本地助手或你人工确认。</span>
       </div>
     </div>`;
   }
