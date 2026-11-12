@@ -408,6 +408,13 @@
     const panel = qi('#stepPanel');
     const step = STEPS.find(s => s.id === activeStep);
     const st = TM.stepStatus(step.id);
+
+    // 进入步骤前先按当前数据校正检查项，避免显示与实际不一致
+    if (st !== 'locked') {
+      if (step.id === 1) syncOrgChecks(step);
+      if (step.id === 8) syncStep8Checks(step);
+    }
+
     const saved = TM.stepState(step.id);
     const [badgeCls, badgeIcon] = stepMetaLabel(step.role);
 
@@ -478,13 +485,15 @@
           ${step.id === 1 ? `
           <div class="step-block">
             <div class="step-block__label">需要你操作</div>
-            ${companyForm()}
+            ${st === 'locked' ? '' : companyForm()}
           </div>` : ''}
 
           ${step.id === 8 ? `
           <div class="step-block">
             <div class="step-block__label">需要你操作</div>
-            ${inviteBox()}
+            ${st === 'locked'
+              ? `<div class="note note--warn">${icon('lock')}<span>完成第 7 步「知识库测试」后即可邀请员工试用。</span></div>`
+              : inviteBox()}
           </div>` : ''}
 
           ${step.exec && step.id !== 7 ? `
@@ -611,24 +620,14 @@
     const bp = qi('#btnPrev'); if (bp) bp.onclick = () => nav(step.id - 1);
     const bn = qi('#btnNext'); if (bn) bn.onclick = () => nav(step.id + 1);
 
+    // 第 1 步：企业信息表单
+    if (step.id === 1) bindCompanyForm(step);
     // 第 3 步：资料上传与分类
     if (step.id === 3) bindDocManager(step);
     // 第 7 步：测试工作台
     if (step.id === 7) bindTestBench(step);
-
-    // 邀请
-    const bi = qi('#btnInvite');
-    if (bi) bi.onclick = () => modal({
-      title: '邀请员工试用',
-      desc: '受邀员工只能使用助手，看不到配置和原始资料。',
-      body: `<div class="grid g2" style="gap:12px">
-        <div class="field"><label class="field__label">姓名</label><input class="input" placeholder="例如 李婉"></div>
-        <div class="field"><label class="field__label">岗位</label><select class="select"><option>销售</option><option>技术</option><option>客服</option><option>采购</option></select></div>
-      </div>
-      <div class="field" style="margin-bottom:0"><label class="field__label">企业邮箱</label><input class="input" placeholder="name@hensen-tools.com"></div>`,
-      okText: '发送邀请',
-      onOk: () => toast('邀请已发送，对方接受后即可使用员工门户'),
-    });
+    // 第 8 步：员工邀请与反馈
+    if (step.id === 8) bindInviteBox(step);
   }
 
   /* 第 3、4 步的日志跟着实际资料走，避免数字对不上 */
@@ -729,22 +728,103 @@
     }, 600);
   }
 
+  /* ---------------------------------------------------------------------
+     第 1 步：企业信息（真表单，输入即保存）
+     --------------------------------------------------------------------- */
   function companyForm() {
     const o = S.org;
-    return `<div class="card" style="padding:16px;background:var(--surface-2);box-shadow:none">
+    const sizes = ['1–10 人', '11–50 人', '51–200 人', '200 人以上'];
+
+    return `<div class="org-form">
       <div class="grid g2" style="gap:12px">
-        <div class="field"><label class="field__label">企业名称</label><input class="input" value="${esc(o.name)}"></div>
-        <div class="field"><label class="field__label">所属行业</label><input class="input" value="${esc(o.industry)}"></div>
-        <div class="field"><label class="field__label">员工人数</label><select class="select"><option>1–10 人</option><option selected>11–50 人</option><option>51–200 人</option><option>200 人以上</option></select></div>
-        <div class="field"><label class="field__label">使用人数（预计）</label><input class="input" value="8 人" placeholder="多少员工会用这个系统"></div>
-        <div class="field"><label class="field__label">主要出口市场</label><input class="input" value="欧洲、中东、东南亚"></div>
-        <div class="field"><label class="field__label">主营产品类别</label><input class="input" value="手动工具、电动工具配件"></div>
+        <div class="field">
+          <label class="field__label">企业名称 <i class="req">*</i></label>
+          <input class="input" data-org="name" value="${esc(o.name)}" placeholder="营业执照上的全称">
+        </div>
+        <div class="field">
+          <label class="field__label">所属行业 <i class="req">*</i></label>
+          <input class="input" data-org="industry" value="${esc(o.industry)}" placeholder="例如 五金工具出口">
+        </div>
+        <div class="field">
+          <label class="field__label">员工人数</label>
+          <select class="select" data-org="size">
+            ${sizes.map(s => `<option ${s === o.size ? 'selected' : ''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label">预计使用人数</label>
+          <input class="input" type="number" min="1" max="999" data-org="headcount" value="${o.headcount || 8}">
+        </div>
+        <div class="field">
+          <label class="field__label">主要出口市场</label>
+          <input class="input" data-org="markets" value="${esc(o.markets || '')}" placeholder="例如 欧洲、中东、东南亚">
+        </div>
+        <div class="field">
+          <label class="field__label">主营产品类别 <i class="req">*</i></label>
+          <input class="input" data-org="categories" value="${esc(o.categories || '')}" placeholder="最多 3 项，用顿号分隔">
+        </div>
       </div>
       <div class="field" style="margin-bottom:0">
-        <label class="field__label">最想让 AI 先解决的问题</label>
-        <textarea class="textarea" placeholder="一句话即可">销售每次报价都要找技术部确认参数，客户等半天。</textarea>
+        <label class="field__label">最想让 AI 先解决的问题 <i class="req">*</i></label>
+        <textarea class="textarea" data-org="goal" placeholder="一句话即可，越具体越好">${esc(o.goal || '')}</textarea>
+        <div class="field__hint row--between">
+          <span>这句话会作为助手回答的取向参考</span>
+          <span id="goalCount">${(o.goal || '').length} / 10 字</span>
+        </div>
+      </div>
+      <div class="org-form__foot">
+        <span class="fs11 muted" id="orgSaved">${icon('check')} 修改自动保存</span>
+        <span class="fs11 muted">${icon('lock')} 这些信息只用于本项目配置</span>
       </div>
     </div>`;
+  }
+
+  function bindCompanyForm(step) {
+    const inputs = qa('[data-org]');
+    if (!inputs.length) return;
+    let timer = null;
+
+    inputs.forEach(el => {
+      const handler = () => {
+        const k = el.dataset.org;
+        let v = el.value;
+        if (k === 'headcount') v = Math.max(1, parseInt(v || '1', 10));
+        S.org[k] = v;
+
+        // 企业名变化时同步侧栏短名
+        if (k === 'name') {
+          const short = v.replace(/^(深圳市|东莞市|广州市|佛山市|宁波市|厦门市|青岛市|上海市|杭州市)/, '').replace(/(有限公司|股份公司|公司)$/, '');
+          S.org.short = (short || v).slice(0, 8);
+        }
+
+        const gc = qi('#goalCount');
+        if (gc) gc.textContent = `${(S.org.goal || '').length} / 10 字`;
+
+        syncOrgChecks(step);
+        syncChrome();
+
+        const sv = qi('#orgSaved') || qi('#orgSaved2');
+        if (sv) sv.innerHTML = icon('check') + ' 已保存 ' + TM.fmtTime(new Date()).slice(0, 5);
+
+        clearTimeout(timer);
+        timer = setTimeout(() => TM.save(), 300);
+      };
+      el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', handler);
+    });
+  }
+
+  function syncOrgChecks(step) {
+    if (!step || step.id !== 1) return;
+    const o = S.org;
+    let reverted = false;
+    if (setCheck(step, 'c1', !!(o.name || '').trim() && !!(o.industry || '').trim())) reverted = true;
+    if (setCheck(step, 'c2', !!(o.categories || '').trim())) reverted = true;
+    if (setCheck(step, 'c3', (o.goal || '').trim().length >= 10)) reverted = true;
+    refreshGate(step, TM.stepState(step.id));
+    if (reverted) {
+      toast('有必填项没填完整，第 1 步需要重新确认', 'warn');
+      syncProgressUI();
+    }
   }
 
   /* ---------------------------------------------------------------------
@@ -1213,17 +1293,142 @@
     return reverted;
   }
 
+  /* ---------------------------------------------------------------------
+     第 8 步：员工试用（邀请成员 + 提问计数 + 反馈）
+     --------------------------------------------------------------------- */
+  const staffMembers = () => (S.members || []).filter(m => m.role !== '企业管理员' && m.role !== '服务顾问');
+
   function inviteBox() {
+    const staff = staffMembers();
+    const asks = S.portalAsks || 0;
+    const fb = S.feedback || [];
+
     return `<div class="card" style="padding:16px;background:var(--surface-2);box-shadow:none">
       <div class="row--between mb12">
-        <div><b class="fs13">已邀请 0 人</b><div class="fs11 muted mt4">建议先邀请 3–5 名销售岗员工</div></div>
+        <div>
+          <b class="fs13">试用成员 ${staff.length} 人</b>
+          <div class="fs11 muted mt4">受邀成员只能使用助手，看不到配置与原始资料</div>
+        </div>
         <button class="btn btn--ghost btn--sm" id="btnInvite">${icon('userPlus')} 邀请员工</button>
       </div>
-      <div class="empty" style="padding:24px 0">
-        ${icon('users')}
-        <p class="fs12">还没有邀请员工。试用期的反馈比测试题更真实。</p>
+      <div class="stack" style="gap:7px">
+        ${staff.length ? staff.map(m => `
+          <div class="doc-item">
+            <span class="avatar" style="width:30px;height:30px;font-size:11px;background:${m.status === 'active' ? '#2C5866' : '#7A5C2E'}">${esc(m.name.slice(0, 1))}</span>
+            <div class="doc-item__body">
+              <b>${esc(m.name)} · ${esc(m.role)}</b>
+              <span>${esc(m.email)} · 邀请于 ${esc(m.at)}</span>
+            </div>
+            <span class="badge ${m.status === 'active' ? 'badge--success badge--dot' : ''}">${m.status === 'active' ? '已激活' : '待接受'}</span>
+            ${m.status !== 'active' ? `<button class="btn btn--quiet btn--sm" data-reinvite="${esc(m.id)}">重发</button>` : ''}
+            <button class="btn btn--quiet btn--sm doc-item__del" data-remove="${esc(m.id)}" title="移除">${icon('x')}</button>
+          </div>`).join('') : `<div class="empty" style="padding:22px 0">${icon('users')}<p class="fs12">还没有邀请员工。试用期的反馈比测试题更真实。</p></div>`}
+      </div>
+    </div>
+
+    <div class="grid g2 mt12" style="gap:12px">
+      <div class="card" style="padding:14px;background:#fff">
+        <div class="row--between">
+          <span class="fs12 b5">真实提问次数</span>
+          <span class="fs12 tnum b6" id="askCount">${asks} / 5</span>
+        </div>
+        <div class="bar mt8" style="height:5px"><div class="bar__fill" id="askBar" style="width:${Math.min(100, asks / 5 * 100)}%"></div></div>
+        <div class="fs11 muted mt8">在「员工门户」里每问一次就 +1</div>
+      </div>
+      <div class="card" style="padding:14px;background:#fff">
+        <div class="row--between mb8">
+          <span class="fs12 b5">试用反馈</span>
+          <span class="fs12 tnum b6" id="fbCount">${fb.length} 条</span>
+        </div>
+        <div class="fs11 muted" id="fbLast" style="min-height:32px;line-height:1.5">${fb.length ? '最近：' + esc(fb[fb.length - 1].txt) : '还没有反馈记录'}</div>
+        <button class="btn btn--ghost btn--sm mt8" id="btnFeedback">${icon('edit')} 记录一条反馈</button>
       </div>
     </div>`;
+  }
+
+  function bindInviteBox(step) {
+    const bi = qi('#btnInvite');
+    if (bi) bi.onclick = () => openInvite(step);
+
+    qa('[data-remove]').forEach(b => b.onclick = () => {
+      const id = b.dataset.remove;
+      const m = (S.members || []).find(x => x.id === id);
+      if (!m) return;
+      S.members = S.members.filter(x => x.id !== id);
+      TM.save();
+      const reverted = syncStep8Checks(step);
+      if (reverted) router();
+      else { renderStepPanel(); toast(`已移除 ${m.name}`, 'info'); }
+    });
+
+    qa('[data-reinvite]').forEach(b => b.onclick = () => {
+      const m = (S.members || []).find(x => x.id === b.dataset.reinvite);
+      toast(`邀请邮件已重发给 ${m ? m.email : '对方'}`);
+    });
+
+    const bf = qi('#btnFeedback');
+    if (bf) bf.onclick = () => modal({
+      title: '记录试用反馈',
+      desc: '员工说哪句话不顺手、哪个问题答错了，都值得记一笔。',
+      body: `<div class="field"><label class="field__label">反馈内容 <i class="req">*</i></label>
+          <textarea class="textarea" id="fbTxt" placeholder="例如：问 HS-2041 的包装尺寸，答的是旧版规格"></textarea></div>
+        <div class="field" style="margin-bottom:0"><label class="field__label">谁反馈的</label>
+          <select class="select" id="fbWho">${staffMembers().map(m => `<option>${esc(m.name)}</option>`).join('') || '<option>管理员代记</option>'}</select></div>`,
+      okText: '保存反馈',
+      onOk: (back) => {
+        const txt = back.querySelector('#fbTxt').value.trim();
+        if (txt.length < 4) { toast('至少写一句话', 'warn'); return false; }
+        const who = back.querySelector('#fbWho').value;
+        S.feedback.push({ txt, who, at: TM.fmtDate(new Date()) });
+        TM.save();
+        renderStepPanel();
+        toast('反馈已记录');
+      },
+    });
+  }
+
+  function openInvite(step) {
+    modal({
+      title: '邀请员工试用',
+      desc: '受邀成员只能使用助手，看不到配置与原始资料。',
+      body: `<div class="field"><label class="field__label">姓名 <i class="req">*</i></label>
+          <input class="input" id="invName" placeholder="例如 张浩"></div>
+        <div class="field"><label class="field__label">企业邮箱 <i class="req">*</i></label>
+          <input class="input" id="invEmail" placeholder="name@hensen-tools.com"></div>
+        <div class="field" style="margin-bottom:0"><label class="field__label">角色</label>
+          <select class="select" id="invRole"><option>销售员工</option><option>销售主管</option><option>技术</option><option>客服</option></select></div>`,
+      okText: '发送邀请',
+      onOk: (back) => {
+        const name = back.querySelector('#invName').value.trim();
+        const email = back.querySelector('#invEmail').value.trim();
+        const role = back.querySelector('#invRole').value;
+        if (!name) { toast('填一下姓名', 'warn'); return false; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('邮箱格式不对', 'warn'); return false; }
+        if ((S.members || []).some(x => x.email.toLowerCase() === email.toLowerCase())) {
+          toast('这个邮箱已经在成员列表里了', 'warn');
+          return false;
+        }
+        S.members.push({ id: 'm' + Date.now(), name, email, role, status: 'pending', at: TM.fmtDate(new Date()) });
+        TM.save();
+        if (step) renderStepPanel();
+        else router();
+        toast(`邀请已发送给 ${name}`);
+      },
+    });
+  }
+
+  function syncStep8Checks(step) {
+    if (!step || step.id !== 8) return false;
+    let reverted = false;
+    if (setCheck(step, 'c1', staffMembers().length >= 3)) reverted = true;
+    if (setCheck(step, 'c2', (S.portalAsks || 0) >= 5)) reverted = true;
+    if (setCheck(step, 'c3', (S.feedback || []).length > 0)) reverted = true;
+    refreshGate(step, TM.stepState(step.id));
+    if (reverted) {
+      toast('试用条件不再满足，第 8 步需要重新确认', 'warn');
+      syncProgressUI();
+    }
+    return reverted;
   }
 
   function openAssist() {
@@ -1600,13 +1805,17 @@
      5. 成员与权限
      ===================================================================== */
   function renderMembers(root) {
-    const people = [
-      { n: '陈志强', e: 'chen@hensen-tools.com', r: '企业管理员', s: '在线', c: '#2C5866', last: '刚刚' },
-      { n: '李婉', e: 'liwan@hensen-tools.com', r: '销售主管', s: '在线', c: '#7A5C2E', last: '2 小时前' },
-      { n: '周明', e: 'zhouming@maozhiku.com', r: '服务顾问（外部）', s: '受限', c: '#3E4F63', last: '1 小时前' },
-      { n: '张浩', e: 'zhanghao@hensen-tools.com', r: '销售员工', s: '待接受', c: '#4A6B76', last: '—' },
-      { n: '吴静', e: 'wujing@hensen-tools.com', r: '销售员工', s: '待接受', c: '#5B4A6B', last: '—' },
-    ];
+    const people = S.members || [];
+    const AV = ['#2C5866', '#7A5C2E', '#3E4F63', '#4A6B76', '#5B4A6B', '#2F5E4E'];
+    const active = people.filter(p => p.status === 'active').length;
+    const pending = people.filter(p => p.status === 'pending').length;
+    const roles = new Set(people.map(p => p.role)).size;
+
+    const statusCell = (s) => s === 'active'
+      ? '<span class="badge badge--success badge--dot">在线</span>'
+      : s === 'limited'
+        ? '<span class="badge badge--warn badge--dot">受限访问</span>'
+        : '<span class="badge">待接受</span>';
 
     root.innerHTML = `<div class="page page--narrow">
       ${pageHead('成员与权限', '谁能看什么、谁能改什么。服务顾问只有在你授权后才能进入本项目。',
@@ -1614,9 +1823,9 @@
 
       <div class="grid g4 mb20">
         ${[
-          ['成员总数', '5', '含 1 位外部服务顾问'],
-          ['已激活', '3', '2 人待接受邀请'],
-          ['角色数', '4', '管理员 / 主管 / 员工 / 顾问'],
+          ['成员总数', String(people.length), `含 1 位外部服务顾问`],
+          ['已激活', String(active), pending ? `${pending} 人待接受邀请` : '全部已接受'],
+          ['角色数', String(roles), '管理员 / 主管 / 员工 / 顾问'],
           ['数据隔离', '已启用', '企业间不可互访'],
         ].map(([k, v, s]) => `
           <div class="card card--pad">
@@ -1628,24 +1837,24 @@
 
       <div class="card" style="overflow:hidden">
         <table class="table">
-          <thead><tr><th>成员</th><th style="width:170px">角色</th><th style="width:110px">状态</th><th style="width:120px">最近活动</th><th style="width:60px"></th></tr></thead>
+          <thead><tr><th>成员</th><th style="width:170px">角色</th><th style="width:110px">状态</th><th style="width:120px">加入时间</th><th style="width:60px"></th></tr></thead>
           <tbody>
-            ${people.map(p => `
+            ${people.length ? people.map((p, i) => `
               <tr>
                 <td>
                   <div class="row" style="gap:10px">
-                    <span class="avatar" style="background:${p.c};width:28px;height:28px;font-size:11px">${esc(p.n.slice(0, 1))}</span>
+                    <span class="avatar" style="background:${AV[i % AV.length]};width:28px;height:28px;font-size:11px">${esc(p.name.slice(0, 1))}</span>
                     <div>
-                      <div class="fs12 b5">${esc(p.n)}</div>
-                      <div class="fs11 muted">${esc(p.e)}</div>
+                      <div class="fs12 b5">${esc(p.name)}</div>
+                      <div class="fs11 muted">${esc(p.email)}</div>
                     </div>
                   </div>
                 </td>
-                <td><span class="tag tag--outline">${esc(p.r)}</span></td>
-                <td>${p.s === '在线' ? '<span class="badge badge--success badge--dot">在线</span>' : p.s === '受限' ? '<span class="badge badge--warn badge--dot">受限访问</span>' : '<span class="badge">待接受</span>'}</td>
-                <td class="fs11 muted">${esc(p.last)}</td>
-                <td><button class="btn btn--quiet btn--sm" style="padding:0 4px">${icon('more')}</button></td>
-              </tr>`).join('')}
+                <td><span class="tag tag--outline">${esc(p.role)}</span></td>
+                <td>${statusCell(p.status)}</td>
+                <td class="fs11 muted">${esc(p.at)}</td>
+                <td><button class="btn btn--quiet btn--sm" style="padding:0 4px" data-mem="${esc(p.id)}">${icon('more')}</button></td>
+              </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-3);font-size:12.5px">还没有成员</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1676,16 +1885,29 @@
       <div class="note note--warn mt16">${icon('shield')}<span><b>关于服务方访问：</b>服务顾问默认看不到任何资料内容。只有在工单中由你勾选「允许查看部署状态」后，才能读取项目状态与错误日志，且可随时在「操作与运行记录」里撤销。本地部署操作永远需要现场或本地助手的显式授权，平台没有远程执行权限。</span></div>
     </div>`;
 
-    qi('#btnInviteM').onclick = () => modal({
-      title: '邀请成员',
-      desc: '邀请后对方会收到邮件，接受即可进入企业工作空间。',
-      body: `<div class="grid g2" style="gap:12px">
-          <div class="field"><label class="field__label">姓名</label><input class="input" placeholder="真实姓名"></div>
-          <div class="field"><label class="field__label">角色</label><select class="select"><option>普通员工</option><option>销售主管</option><option>企业管理员</option></select></div>
-        </div>
-        <div class="field" style="margin-bottom:0"><label class="field__label">企业邮箱</label><input class="input" placeholder="name@company.com"></div>`,
-      okText: '发送邀请',
-      onOk: () => toast('邀请已发送'),
+    qi('#btnInviteM').onclick = () => openInvite(null);
+
+    qa('[data-mem]').forEach(b => b.onclick = () => {
+      const m = people.find(x => x.id === b.dataset.mem);
+      if (!m) return;
+      modal({
+        title: `${m.name} · ${m.role}`,
+        desc: m.email,
+        body: `<div class="stack" style="gap:0">
+            ${[
+              ['状态', m.status === 'active' ? '已激活' : m.status === 'limited' ? '受限访问' : '待接受邀请'],
+              ['加入时间', m.at],
+              ['可访问', m.role === '企业管理员' ? '全部项目与配置' : m.role === '服务顾问' ? '仅授权范围内的部署状态' : '助手与知识库问答'],
+            ].map(([k, v]) => `<div class="row--between" style="padding:9px 0;border-bottom:1px solid var(--border)">
+              <span class="fs12 muted">${k}</span><span class="fs12 b5">${esc(v)}</span></div>`).join('')}
+          </div>
+          <div class="field mt16" style="margin-bottom:0"><label class="field__label">调整角色</label>
+            <select class="select"><option ${m.role === '企业管理员' ? 'selected' : ''}>企业管理员</option><option ${m.role === '销售主管' ? 'selected' : ''}>销售主管</option><option ${m.role === '销售员工' ? 'selected' : ''}>销售员工</option><option ${m.role === '技术' ? 'selected' : ''}>技术</option><option ${m.role === '客服' ? 'selected' : ''}>客服</option></select>
+          </div>`,
+        okText: '保存',
+        cancelText: '关闭',
+        onOk: () => toast('成员设置已更新'),
+      });
     });
   }
 
@@ -1927,11 +2149,11 @@
           <div class="card card--pad">
             <b class="fs12">使用情况</b>
             <div class="row mt12" style="gap:18px">
-              <div><div class="fs11 muted">本周提问</div><div class="fs15 b6 tnum mt4">64</div></div>
-              <div><div class="fs11 muted">答不上来</div><div class="fs15 b6 tnum mt4">3</div></div>
+              <div><div class="fs11 muted">累计提问</div><div class="fs15 b6 tnum mt4" id="askNum">${S.portalAsks || 0}</div></div>
+              <div><div class="fs11 muted">答不上来</div><div class="fs15 b6 tnum mt4" id="missNum">${S.portalMiss || 0}</div></div>
             </div>
-            <div class="bar mt12" style="height:5px"><div class="bar__fill" style="width:95%"></div></div>
-            <div class="fs11 muted mt8">回答准确率 95% · 高于验收线</div>
+            <div class="bar mt12" style="height:5px"><div class="bar__fill" id="accBar" style="width:${S.portalAsks ? Math.round((1 - (S.portalMiss || 0) / S.portalAsks) * 100) : 0}%"></div></div>
+            <div class="fs11 muted mt8" id="accTxt">${S.portalAsks ? `回答准确率 ${Math.round((1 - (S.portalMiss || 0) / S.portalAsks) * 100)}%` : '还没有提问记录'}</div>
           </div>
 
           <div class="card card--pad">
@@ -1989,6 +2211,18 @@
       await sleep(680 + Math.random() * 420);
       typing.remove();
       const r = answer(text);
+
+      // 提问计数回流到第 8 步的试用检查
+      S.portalAsks = (S.portalAsks || 0) + 1;
+      if (r.gap) S.portalMiss = (S.portalMiss || 0) + 1;
+      TM.save();
+      const an = qi('#askNum'), mn = qi('#missNum'), ab = qi('#accBar'), at = qi('#accTxt');
+      if (an) an.textContent = S.portalAsks;
+      if (mn) mn.textContent = S.portalMiss || 0;
+      const acc = Math.round((1 - (S.portalMiss || 0) / S.portalAsks) * 100);
+      if (ab) ab.style.width = acc + '%';
+      if (at) at.textContent = `回答准确率 ${acc}%`;
+
       const cites = r.cite.length
         ? `<div class="msg__cite">${r.cite.map(c => `<span>${icon('file')}${esc(c)}</span>`).join('')}</div>`
         : `<div class="msg__cite"><span style="border-color:#F0DFC0;color:var(--warn);background:var(--warn-bg)">${icon('alert')}知识库无相关资料</span></div>`;
@@ -2085,14 +2319,22 @@
       <div class="grid g2" style="align-items:start;gap:18px">
         <div class="stack" style="gap:16px">
           <div class="card card--pad">
-            <b class="fs13">企业信息</b>
-            <div class="grid g2 mt12" style="gap:12px">
-              <div class="field"><label class="field__label">企业名称</label><input class="input" value="${esc(S.org.name)}"></div>
-              <div class="field"><label class="field__label">所属行业</label><input class="input" value="${esc(S.org.industry)}"></div>
-              <div class="field" style="margin-bottom:0"><label class="field__label">所在城市</label><input class="input" value="${esc(S.org.city)}"></div>
-              <div class="field" style="margin-bottom:0"><label class="field__label">企业规模</label><input class="input" value="${esc(S.org.size)}"></div>
+            <div class="row--between mb12">
+              <b class="fs13">企业信息</b>
+              <span class="fs11 muted" id="orgSaved2">${icon('check')} 修改自动保存</span>
             </div>
-            <button class="btn btn--primary btn--sm mt16" id="btnSaveOrg">保存修改</button>
+            <div class="grid g2" style="gap:12px">
+              <div class="field"><label class="field__label">企业名称</label><input class="input" data-org="name" value="${esc(S.org.name)}"></div>
+              <div class="field"><label class="field__label">所属行业</label><input class="input" data-org="industry" value="${esc(S.org.industry)}"></div>
+              <div class="field" style="margin-bottom:0"><label class="field__label">所在城市</label><input class="input" data-org="city" value="${esc(S.org.city)}"></div>
+              <div class="field" style="margin-bottom:0"><label class="field__label">企业规模</label>
+                <select class="select" data-org="size">${['1–10 人', '11–50 人', '51–200 人', '200 人以上'].map(x => `<option ${x === S.org.size ? 'selected' : ''}>${x}</option>`).join('')}</select>
+              </div>
+            </div>
+            <div class="field mt12" style="margin-bottom:0">
+              <label class="field__label">最想让 AI 先解决的问题</label>
+              <textarea class="textarea" data-org="goal" placeholder="一句话即可">${esc(S.org.goal || '')}</textarea>
+            </div>
           </div>
 
           <div class="card card--pad">
@@ -2161,7 +2403,7 @@
       </div>
     </div>`;
 
-    qi('#btnSaveOrg').onclick = () => toast('企业信息已保存');
+    bindCompanyForm(null);
     qi('#btnReset').onclick = () => modal({
       title: '重置演示数据',
       desc: '会清空本浏览器内的所有进度与配置。',

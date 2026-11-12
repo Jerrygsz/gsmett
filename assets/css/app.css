@@ -845,6 +845,21 @@ table{border-collapse:collapse;width:100%}
 }
 
 /* ==========================================================================
+   第 1 步 · 企业信息表单
+   ========================================================================== */
+.req{color:var(--danger);font-style:normal;font-size:12px;margin-left:1px}
+.org-form{
+  border:1px solid var(--border);border-radius:10px;background:#fff;padding:16px;
+}
+.org-form .field__label{font-size:12px}
+.org-form__foot{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--border);
+}
+.org-form__foot span{display:inline-flex;align-items:center;gap:5px}
+.org-form__foot svg{width:12px;height:12px}
+
+/* ==========================================================================
    响应式
    ========================================================================== */
 @media(max-width:1180px){

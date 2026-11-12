@@ -201,18 +201,31 @@
     if (!org || !name || !email || !pwd) { toast('请把企业名称、姓名、邮箱和密码填完整', 'warn'); return; }
     if (pwd.length < 8) { toast('密码至少 8 位', 'warn'); return; }
 
-    // 新注册企业：清空进度，从第 1 步开始
+    // 新注册企业：清空进度与演示数据，从第 1 步开始
     TM.reset();
     const s = TM.load();
+    const sizeSel = qi('#regSize');
     s.org.name = org;
-    s.org.short = org.replace(/^(深圳市|东莞市|广州市|佛山市|宁波市|厦门市|青岛市)/, '').slice(0, 8);
+    s.org.short = org.replace(/^(深圳市|东莞市|广州市|佛山市|宁波市|厦门市|青岛市|上海市|杭州市)/, '').replace(/(有限公司|股份公司|公司)$/, '').slice(0, 8) || org.slice(0, 8);
     s.org.contact = name;
     s.org.email = email;
+    s.org.industry = '';
+    s.org.city = '';
+    s.org.size = sizeSel ? sizeSel.value : '11–50 人';
+    s.org.headcount = 3;
+    s.org.markets = '';
+    s.org.categories = '';
+    s.org.goal = '';
     s.user.name = name;
     s.user.initial = name.slice(0, 1);
+    s.members = [
+      { id: 'm1', name, email, role: '企业管理员', status: 'active', at: TM.fmtDate(new Date()) },
+    ];
     s.project.steps = {};
-    s.project.docs = [];
+    s.project.files = [];
     s.project.executed = {};
+    s.project.testRun = { generated: false, ran: false, at: null, marks: {} };
+    s.project.report = null;
     s.project.createdAt = TM.fmtDate(new Date());
     TM.save();
 

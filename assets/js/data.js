@@ -155,13 +155,24 @@ const TM = (() => {
     name: '深圳市恒森进出口有限公司',
     short: '恒森进出口',
     industry: '五金工具 · 跨境出口',
-    size: '30 人',
+    size: '11–50 人',
+    headcount: 8,
     contact: '陈志强',
     role: '老板',
     email: 'chen@hensen-tools.com',
+    phone: '138-0013-8000',
     plan: '标准交付',
     city: '深圳 · 宝安',
+    markets: '欧洲、中东、东南亚',
+    categories: '手动工具、电动工具配件',
+    goal: '销售每次报价都要找技术部确认参数，客户等半天。',
   };
+
+  const MEMBERS = [
+    { id: 'm1', name: '陈志强', email: 'chen@hensen-tools.com', role: '企业管理员', status: 'active', at: '2026-11-05' },
+    { id: 'm2', name: '李婉', email: 'liwan@hensen-tools.com', role: '销售主管', status: 'active', at: '2026-11-06' },
+    { id: 'm3', name: '周明', email: 'zhouming@maozhiku.com', role: '服务顾问', status: 'limited', at: '2026-11-06' },
+  ];
 
   const USER = { name: '陈志强', role: '企业管理员', initial: '陈' };
 
@@ -419,9 +430,9 @@ const TM = (() => {
       ],
       exec: null,
       checks: [
-        { id: 'c1', label: '已邀请至少 3 名员工', meta: '销售岗优先' },
-        { id: 'c2', label: '已完成至少 20 次真实提问', meta: '试用期 3–5 天' },
-        { id: 'c3', label: '已收集试用反馈', meta: '含答不上来的问题清单' },
+        { id: 'c1', label: '已邀请至少 3 名员工', meta: '不含管理员与服务顾问' },
+        { id: 'c2', label: '已完成至少 5 次真实提问', meta: '在员工门户里提出的问题' },
+        { id: 'c3', label: '已收集试用反馈', meta: '至少 1 条，含答不上来的问题' },
       ],
       status: 'todo',
     },
@@ -631,8 +642,12 @@ const TM = (() => {
   const KEY = 'tm_state_v3';
 
   const defaultState = () => ({
-    user: USER,
-    org: ORG,
+    user: { ...USER },
+    org: { ...ORG },
+    members: MEMBERS.map(m => ({ ...m })),
+    portalAsks: 0,
+    portalMiss: 0,
+    feedback: [],
     project: {
       id: 'P-2026-0193',
       name: '企业 AI 知识库建设',
@@ -667,6 +682,11 @@ const TM = (() => {
         if (!Array.isArray(state.project.files)) state.project.files = DOCS.map(d => ({ ...d }));
         if (!state.project.testRun) state.project.testRun = { generated: false, ran: false, at: null, marks: {} };
         if (!state.project.testRun.marks) state.project.testRun.marks = {};
+        if (!Array.isArray(state.members)) state.members = MEMBERS.map(m => ({ ...m }));
+        if (typeof state.portalAsks !== 'number') state.portalAsks = 0;
+        if (typeof state.portalMiss !== 'number') state.portalMiss = 0;
+        if (!Array.isArray(state.feedback)) state.feedback = [];
+        state.org = { ...ORG, ...state.org };
       } else {
         state = defaultState();
         seed();
@@ -738,7 +758,7 @@ const TM = (() => {
     icon, qi, qa, el, esc, sleep, now, fmtTime, fmtDate, toast, modal, ringSVG,
     get state() { return state || load(); },
     load, save, reset, seed, defaultState,
-    ORG, USER, SERVICES, STEPS, DOCS, DOC_CATS, TEST_QUESTIONS, MODELS, ASSISTANTS, TESTS, ACTIVITY, TODO,
+    ORG, USER, MEMBERS, SERVICES, STEPS, DOCS, DOC_CATS, TEST_QUESTIONS, MODELS, ASSISTANTS, TESTS, ACTIVITY, TODO,
     ADMIN_CLIENTS, ASSIST_REQ, TASKS_MINE,
     stepState, stepStatus, progress, currentStep,
   };
