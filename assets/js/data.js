@@ -648,6 +648,7 @@ const TM = (() => {
     portalAsks: 0,
     portalMiss: 0,
     feedback: [],
+    activity: [],
     project: {
       id: 'P-2026-0193',
       name: '企业 AI 知识库建设',
@@ -686,6 +687,7 @@ const TM = (() => {
         if (typeof state.portalAsks !== 'number') state.portalAsks = 0;
         if (typeof state.portalMiss !== 'number') state.portalMiss = 0;
         if (!Array.isArray(state.feedback)) state.feedback = [];
+        if (!Array.isArray(state.activity)) state.activity = [];
         state.org = { ...ORG, ...state.org };
       } else {
         state = defaultState();
@@ -708,6 +710,13 @@ const TM = (() => {
     });
     state.project.steps[6] = { checks: [], done: false, executed: false };
     state.project.files = DOCS.map(d => ({ ...d }));
+    state.activity = [
+      { t: '11-12 10:14', txt: '知识库构建完成，生成 1,284 个切片', who: '系统' },
+      { t: '11-12 09:40', txt: '确认了数据处理规则与模型授权范围', who: '陈志强' },
+      { t: '11-11 16:20', txt: '完成第 5 步：AI 模型配置', who: '陈志强' },
+      { t: '11-10 09:15', txt: '添加上传 5 份企业资料', who: '李婉' },
+      { t: '11-05 15:02', txt: '项目「企业 AI 知识库建设」已创建', who: '服务顾问 周明' },
+    ];
   }
 
   function save() {

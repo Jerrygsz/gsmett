@@ -227,6 +227,16 @@
     s.project.testRun = { generated: false, ran: false, at: null, marks: {} };
     s.project.report = null;
     s.project.createdAt = TM.fmtDate(new Date());
+    s.project.id = `P-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+
+    // 初始动态只放项目创建这一条，不继承演示数据
+    const n0 = new Date();
+    s.activity = [{
+      t: `${String(n0.getMonth() + 1).padStart(2, '0')}-${String(n0.getDate()).padStart(2, '0')} ${TM.fmtTime(n0).slice(0, 5)}`,
+      txt: '项目「企业 AI 知识库建设」已创建，从第 1 步开始',
+      who: '系统',
+    }];
+
     TM.save();
 
     const btn = e.target.querySelector('button[type=submit]');

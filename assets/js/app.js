@@ -61,6 +61,69 @@
   /* ---------------------------------------------------------------------
      通用片段
      --------------------------------------------------------------------- */
+  /* 计划交付日 = 项目创建日 + 30 天 */
+  function projectDue() {
+    const d = new Date((S.project.createdAt || TM.fmtDate(new Date())) + 'T00:00:00');
+    if (isNaN(d.getTime())) d.setTime(Date.now());
+    d.setDate(d.getDate() + 30);
+    return {
+      m: d.getMonth() + 1,
+      d: d.getDate(),
+      mmdd: `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')}`,
+      full: TM.fmtDate(d),
+    };
+  }
+
+  /* 记录一条真实操作，工作台「最近动态」读它 */
+  function logAct(txt, who) {
+    const d = new Date();
+    S.activity = S.activity || [];
+    S.activity.unshift({
+      t: `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${TM.fmtTime(d).slice(0, 5)}`,
+      txt,
+      who: who || S.user.name,
+    });
+    S.activity = S.activity.slice(0, 20);
+    TM.save();
+  }
+
+  /* 待办跟着当前步骤走，不再用写死的演示数据 */
+  function buildTodos() {
+    const cur = TM.currentStep();
+    const p = TM.progress();
+    const saved = TM.stepState(cur.id);
+    const out = [];
+
+    if (p.done === STEPS.length) {
+      return [{ icon: 'checkCircle', color: 'var(--success)', bg: 'var(--success-bg)', title: '项目已全部完成', desc: '十个步骤均已通过检查，可下载交付材料', act: '查看报告', step: 9 }];
+    }
+
+    const unchecked = cur.checks.filter(c => !saved.checks.includes(c.id));
+    out.push({
+      icon: 'arrowRight', color: 'var(--brand)', bg: 'var(--brand-50)',
+      title: `第 ${cur.id} 步 · ${cur.title}`,
+      desc: unchecked.length
+        ? `还差 ${unchecked.length} 项检查：${unchecked[0].label}`
+        : '检查项已满足，可以点「完成这一步」',
+      act: unchecked.length ? '去处理' : '去确认', step: cur.id,
+    });
+
+    if (cur.id <= 3 && !(S.project.files || []).length) {
+      out.push({ icon: 'folder', color: 'var(--warn)', bg: 'var(--warn-bg)', title: '还没有添加企业资料', desc: '产品目录和规格表决定回答的上限', act: '去上传', step: 3 });
+    }
+
+    if (cur.id >= 7 && !(S.project.testRun && S.project.testRun.generated)) {
+      out.push({ icon: 'target', color: 'var(--info)', bg: 'var(--info-bg)', title: '测试题还没有生成', desc: '50 道题，覆盖产品 / 销售 / 邮件 / 安全', act: '去生成', step: 7 });
+    }
+
+    if (S.project.report && (S.project.report.fix + S.project.report.gap) > 0) {
+      const n = S.project.report.fix + S.project.report.gap;
+      out.push({ icon: 'alert', color: 'var(--warn)', bg: 'var(--warn-bg)', title: `${n} 项待整改`, desc: '报告里的问题清单，约定 3 个工作日内完成', act: '查看报告', step: 9 });
+    }
+
+    return out.slice(0, 3);
+  }
+
   function pageHead(title, desc, actions) {
     return `<div class="page-head">
       <div class="page-head__txt">
@@ -102,23 +165,27 @@
     const p = TM.progress();
     const cur = TM.currentStep();
     const remain = STEPS.length - p.done;
+    const allDone = p.done === STEPS.length;
+    const due = projectDue();
 
     root.innerHTML = `<div class="page">
 
       <div class="hero-strip">
         <div class="hero-strip__txt">
-          <div class="hero-strip__eyebrow">进行中 · 项目编号 ${esc(S.project.id)}</div>
-          <h2>${esc(S.project.name)}：还剩 ${remain} 步</h2>
-          <p>当前在第 ${cur.id} 步「${esc(cur.title)}」。${cur.id === 6 ? '配置已确认，等待执行创建助手。' : '按向导继续即可，遇到卡点可以随时申请人工协助。'}计划 12 月 8 日完成交付。</p>
+          <div class="hero-strip__eyebrow">${allDone ? '已完成' : '进行中'} · 项目编号 ${esc(S.project.id)}</div>
+          <h2>${esc(S.project.name)}${allDone ? '：已交付' : `：还剩 ${remain} 步`}</h2>
+          <p>${allDone
+            ? '十个步骤全部完成，验收报告与操作手册已归档。后续的知识库更新、权限调整都在配置中心处理。'
+            : `当前在第 ${cur.id} 步「${esc(cur.title)}」。${cur.id === 6 ? '配置已确认，等待执行创建助手。' : '按向导继续即可，遇到卡点可以随时申请人工协助。'}计划 ${due.m} 月 ${due.d} 日完成交付。`}</p>
           <div class="row mt16">
-            <a class="btn btn--primary" href="#wizard/${cur.id}">继续第 ${cur.id} 步 ${icon('arrowRight')}</a>
+            <a class="btn btn--primary" href="#wizard/${cur.id}">${allDone ? '查看交付记录' : `继续第 ${cur.id} 步`} ${icon('arrowRight')}</a>
             <a class="btn" href="#test" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff">查看测试与验收</a>
           </div>
         </div>
         <div class="hero-strip__stats">
           <div class="hero-strip__stat"><b>${p.pct}%</b><span>整体进度</span></div>
           <div class="hero-strip__stat"><b>${p.done}/${p.total}</b><span>已完成步骤</span></div>
-          <div class="hero-strip__stat"><b>12-08</b><span>计划交付</span></div>
+          <div class="hero-strip__stat"><b>${due.mmdd}</b><span>计划交付</span></div>
         </div>
       </div>
 
@@ -153,14 +220,12 @@
           </div>
           <div class="row--between" style="font-size:12px;color:var(--text-3)">
             <span>已完成 ${p.done} / ${p.total} 个步骤 · 当前第 ${cur.id} 步</span>
-            <span>预计 3 天完成当前阶段</span>
+            <span>本步预计 ${cur.minutes} 分钟</span>
           </div>
           <div class="proj-card__foot">
-            <div class="row" style="gap:-6px">
-              <span class="avatar" style="width:24px;height:24px;font-size:10px;background:#2C5866">陈</span>
-              <span class="avatar" style="width:24px;height:24px;font-size:10px;background:#7A5C2E;margin-left:-6px">李</span>
-              <span class="avatar" style="width:24px;height:24px;font-size:10px;background:#3E4F63;margin-left:-6px">周</span>
-              <span class="fs12 muted" style="margin-left:8px">3 人参与</span>
+            <div class="row">
+              ${(S.members || []).slice(0, 3).map((m, i) => `<span class="avatar" style="width:24px;height:24px;font-size:10px;background:${['#2C5866', '#7A5C2E', '#3E4F63'][i % 3]};${i ? 'margin-left:-6px' : ''}">${esc(m.name.slice(0, 1))}</span>`).join('')}
+              <span class="fs12 muted" style="margin-left:8px">${(S.members || []).length} 人参与</span>
             </div>
             <a class="btn btn--ghost btn--sm" href="#wizard/${cur.id}">继续项目 ${icon('arrowRight')}</a>
           </div>
@@ -178,10 +243,10 @@
         </div>
       </div>
 
-      ${sectionHead('需要你处理', `${TODO.length} 项待办`)}
+      ${sectionHead('需要你处理', `${buildTodos().length} 项待办`)}
       <div class="grid g2" style="align-items:start">
         <div class="card card--pad">
-          ${TODO.map(t => `
+          ${buildTodos().map(t => `
             <div class="todo-item">
               <span class="todo-item__ico" style="background:${t.bg};color:${t.color}">${icon(t.icon)}</span>
               <div class="todo-item__body">
@@ -198,11 +263,11 @@
             <a class="fs12 muted" href="#logs">全部记录</a>
           </div>
           <div class="tl">
-            ${ACTIVITY.slice(0, 5).map(a => `
-              <div class="tl-item ${a.type === 'warn' ? '' : 'tl-item--done'}">
+            ${(S.activity && S.activity.length) ? S.activity.slice(0, 5).map(a => `
+              <div class="tl-item tl-item--done">
                 <b>${esc(a.txt)}</b>
                 <span>${esc(a.who)} · ${esc(a.t)}</span>
-              </div>`).join('')}
+              </div>`).join('') : `<div class="fs12 muted" style="padding:8px 0">还没有操作记录。完成第一步后会出现在这里。</div>`}
           </div>
         </div>
       </div>
@@ -356,7 +421,7 @@
 
     root.innerHTML = `<div class="page">
       ${pageHead(S.project.name,
-        `项目编号 ${S.project.id} · 服务顾问 ${S.project.owner} · 计划交付 2026-12-08`,
+        `项目编号 ${S.project.id} · 服务顾问 ${S.project.owner} · 计划交付 ${projectDue().full}`,
         `<span class="badge badge--brand badge--dot">实施中</span>
          <button class="btn btn--ghost btn--sm" id="btnAssist">${icon('help')} 申请人工协助</button>`)}
 
@@ -714,6 +779,7 @@
     saved.done = true;
     saved.at = TM.fmtDate(new Date());
     TM.save();
+    logAct(`完成第 ${step.id} 步：${step.title}`);
     toast(`第 ${step.id} 步已完成`);
 
     setTimeout(() => {
@@ -965,6 +1031,7 @@
       TM.save();
       syncDocChecks(step);
       renderStepPanel();
+      logAct(`添加上传 ${added} 份企业资料`);
       toast(`已添加 ${added} 份资料${dup ? `，${dup} 份重复已跳过` : ''}`);
     } else if (dup) {
       toast(`${dup} 份文件已在列表中`, 'warn');
@@ -1188,6 +1255,7 @@
         keyDone: s.keyDone,
       };
       TM.save();
+      logAct(`生成测试报告，通过率 ${s.rate}%`, '系统');
       toast(`测试报告已生成 · 通过率 ${s.rate}%`);
       renderStepPanel();
     };
@@ -1217,6 +1285,7 @@
       const st = testStats();
       S.project.report = { at: TM.fmtDate(new Date()), rate: st.rate, pass: st.pass, fix: st.fix, gap: st.gap, keyDone: st.keyDone };
       TM.save();
+      logAct(`生成测试报告，通过率 ${st.rate}%`, '系统');
       toast(`测试报告已生成 · 通过率 ${st.rate}%`);
       renderStepPanel();
     };
@@ -1255,6 +1324,7 @@
     run.at = TM.fmtDate(new Date()) + ' ' + TM.fmtTime(new Date()).slice(0, 5);
     TM.save();
     renderStepPanel();
+    logAct(`运行 ${Q.length} 道测试题，通过率 ${testStats().rate}%`, '系统');
     toast(`${Q.length} 题运行完成，请核对关键题`);
   }
 
@@ -1381,6 +1451,7 @@
         const who = back.querySelector('#fbWho').value;
         S.feedback.push({ txt, who, at: TM.fmtDate(new Date()) });
         TM.save();
+        logAct('记录一条试用反馈');
         renderStepPanel();
         toast('反馈已记录');
       },
@@ -1410,6 +1481,7 @@
         }
         S.members.push({ id: 'm' + Date.now(), name, email, role, status: 'pending', at: TM.fmtDate(new Date()) });
         TM.save();
+        logAct(`邀请成员 ${name}（${role}）`);
         if (step) renderStepPanel();
         else router();
         toast(`邀请已发送给 ${name}`);
