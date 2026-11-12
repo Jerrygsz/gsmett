@@ -610,14 +610,27 @@ const TM = (() => {
   ];
 
   /* 服务商后台 */
+  /* ---------------------------------------------------------------------
+     服务商后台
+     --------------------------------------------------------------------- */
+  const ADMIN_KEY = 'tm_admin_v1';
+
+  /* 演示环境的服务商账号（纯前端，仅用于流程演示） */
+  const ADMIN_ACCOUNT = {
+    email: 'admin@maozhiku.com',
+    pwd: 'maozhiku2026',
+    name: '周明',
+    role: '服务商管理员',
+  };
+
   const ADMIN_CLIENTS = [
-    { org: '深圳市恒森进出口有限公司', contact: '陈志强', svc: '企业 AI 知识库', stage: '实施中', pct: 50, owner: '周明', amount: '¥18,800', due: '2026-12-08', health: 'good' },
-    { org: '东莞锐拓五金制品厂', contact: '刘伟', svc: 'AI 外贸销售助手', stage: '实施中', pct: 72, owner: '周明', amount: '¥12,600', due: '2026-11-28', health: 'good' },
-    { org: '宁波海途户外用品', contact: '王倩', svc: '企业 AI 培训系统', stage: '待启动', pct: 0, owner: '林可', amount: '¥8,800', due: '2026-12-20', health: 'warn' },
-    { org: '广州鑫联电子', contact: '张海', svc: '企业 AI 知识库', stage: '验收中', pct: 88, owner: '林可', amount: '¥18,800', due: '2026-11-15', health: 'good' },
-    { org: '佛山欧盛家居', contact: '黄敏', svc: '企业 AI 知识库', stage: '维护期', pct: 100, owner: '周明', amount: '¥18,800', due: '2026-10-30', health: 'good' },
-    { org: '厦门拓洋贸易', contact: '林志远', svc: 'AI 外贸销售助手', stage: '实施中', pct: 34, owner: '林可', amount: '¥12,600', due: '2026-12-12', health: 'risk' },
-    { org: '青岛万隆机械', contact: '孙磊', svc: '企业 AI 知识库', stage: '需求确认', pct: 8, owner: '周明', amount: '¥18,800', due: '2026-12-30', health: 'warn' },
+    { id: 'c1', pid: 'P-2026-0193', org: '深圳市恒森进出口有限公司', contact: '陈志强', phone: '138-0013-8000', email: 'chen@hensen-tools.com', industry: '五金工具 · 跨境出口', size: '11–50 人', city: '深圳 · 宝安', svc: '企业 AI 知识库', stage: '实施中', pct: 50, owner: '周明', amount: '¥18,800', due: '2026-12-08', health: 'good', createdAt: '2026-11-05', note: '' },
+    { id: 'c2', pid: 'P-2026-0194', org: '东莞锐拓五金制品厂', contact: '刘伟', phone: '137-2200-1188', email: 'liu@ruituo.com', industry: '五金制品', size: '51–200 人', city: '东莞 · 长安', svc: 'AI 外贸销售助手', stage: '实施中', pct: 72, owner: '周明', amount: '¥12,600', due: '2026-11-28', health: 'good', createdAt: '2026-10-28', note: '' },
+    { id: 'c3', pid: 'P-2026-0195', org: '宁波海途户外用品', contact: '王倩', phone: '139-5740-2210', email: 'wang@haitu.com', industry: '户外用品', size: '11–50 人', city: '宁波 · 鄞州', svc: '企业 AI 培训系统', stage: '待启动', pct: 0, owner: '林可', amount: '¥8,800', due: '2026-12-20', health: 'warn', createdAt: '2026-11-10', note: '客户电脑为 Windows 7，需评估方案' },
+    { id: 'c4', pid: 'P-2026-0196', org: '广州鑫联电子', contact: '张海', phone: '136-0021-8899', email: 'zhang@xinlian.cn', industry: '消费电子', size: '51–200 人', city: '广州 · 番禺', svc: '企业 AI 知识库', stage: '验收中', pct: 88, owner: '林可', amount: '¥18,800', due: '2026-11-15', health: 'good', createdAt: '2026-10-12', note: '' },
+    { id: 'c5', pid: 'P-2026-0197', org: '佛山欧盛家居', contact: '黄敏', phone: '138-2266-3377', email: 'huang@osen.com', industry: '家居建材', size: '51–200 人', city: '佛山 · 顺德', svc: '企业 AI 知识库', stage: '维护期', pct: 100, owner: '周明', amount: '¥18,800', due: '2026-10-30', health: 'good', createdAt: '2026-09-20', note: '维护期至 2027-10' },
+    { id: 'c6', pid: 'P-2026-0198', org: '厦门拓洋贸易', contact: '林志远', phone: '135-0011-4455', email: 'lin@tuoyang.com', industry: '建材贸易', size: '11–50 人', city: '厦门 · 湖里', svc: 'AI 外贸销售助手', stage: '实施中', pct: 34, owner: '林可', amount: '¥12,600', due: '2026-12-12', health: 'risk', createdAt: '2026-11-02', note: 'API 密钥校验失败，待排查' },
+    { id: 'c7', pid: 'P-2026-0199', org: '青岛万隆机械', contact: '孙磊', phone: '139-5320-7788', email: 'sun@wanlong.cn', industry: '机械制造', size: '200 人以上', city: '青岛 · 城阳', svc: '企业 AI 知识库', stage: '需求确认', pct: 8, owner: '周明', amount: '¥18,800', due: '2026-12-30', health: 'warn', createdAt: '2026-11-08', note: '资料以扫描件为主' },
   ];
 
   const ASSIST_REQ = [
@@ -651,6 +664,7 @@ const TM = (() => {
     activity: [],
     project: {
       id: 'P-2026-0193',
+      pid: 'P-2026-0193',
       name: '企业 AI 知识库建设',
       serviceId: 'kb',
       createdAt: '2026-11-05',
@@ -721,6 +735,180 @@ const TM = (() => {
 
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { }
+    syncToAdmin();
+  }
+
+  /* 客户端的进度回写服务商后台的客户档案 */
+  function syncToAdmin() {
+    if (!state || !state.project || !state.project.pid) return;
+    try {
+      const raw = localStorage.getItem(ADMIN_KEY);
+      if (!raw) return;
+      const a = JSON.parse(raw);
+      const c = (a.clients || []).find(x => x.pid === state.project.pid);
+      if (!c) return;
+      const done = STEPS.filter(x => stepState(x.id).done).length;
+      const pct = Math.round(done / STEPS.length * 100);
+      c.pct = pct;
+      c.stage = pct >= 100 ? '维护期' : (state.project.report ? '验收中' : pct > 0 ? '实施中' : '待启动');
+      localStorage.setItem(ADMIN_KEY, JSON.stringify(a));
+      localStorage.setItem('tm_client_' + c.id, JSON.stringify(state));
+    } catch (e) { }
+  }
+
+  /* ---------------- 服务商后台数据 ---------------- */
+  function adminDefault() {
+    return { seq: 199, clients: ADMIN_CLIENTS.map(c => ({ ...c })) };
+  }
+
+  function loadAdmin() {
+    try {
+      const raw = localStorage.getItem(ADMIN_KEY);
+      if (raw) {
+        const a = JSON.parse(raw);
+        if (!Array.isArray(a.clients)) a.clients = adminDefault().clients;
+        if (!a.seq) a.seq = 199;
+        return a;
+      }
+    } catch (e) { }
+    const a = adminDefault();
+    try { localStorage.setItem(ADMIN_KEY, JSON.stringify(a)); } catch (e) { }
+    return a;
+  }
+
+  function saveAdmin(a) {
+    try { localStorage.setItem(ADMIN_KEY, JSON.stringify(a)); } catch (e) { }
+  }
+
+  /* 为一个新客户生成空白的企业工作空间 */
+  function buildClientState(c) {
+    const d = new Date();
+    const today = fmtDate(d);
+    const t = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${fmtTime(d).slice(0, 5)}`;
+    const shortName = (c.org || '')
+      .replace(/^(深圳市|东莞市|广州市|佛山市|宁波市|厦门市|青岛市|上海市|杭州市|苏州市)/, '')
+      .replace(/(有限公司|股份公司|公司|工厂|厂)$/, '')
+      .slice(0, 8) || (c.org || '').slice(0, 8);
+
+    return {
+      user: { name: c.contact || '企业管理员', role: '企业管理员', initial: (c.contact || '客').slice(0, 1) },
+      org: {
+        name: c.org,
+        short: shortName,
+        industry: c.industry || '',
+        size: c.size || '11–50 人',
+        headcount: 3,
+        contact: c.contact || '',
+        role: '老板',
+        email: c.email || '',
+        phone: c.phone || '',
+        plan: '标准交付',
+        city: c.city || '',
+        markets: '',
+        categories: '',
+        goal: '',
+      },
+      members: [{ id: 'm1', name: c.contact || '企业管理员', email: c.email || '', role: '企业管理员', status: 'active', at: today }],
+      portalAsks: 0,
+      portalMiss: 0,
+      feedback: [],
+      activity: [{ t, txt: `项目「${c.svc}」已创建，从第 1 步开始`, who: '系统' }],
+      project: {
+        id: c.pid,
+        pid: c.pid,
+        name: c.svc || '企业 AI 知识库建设',
+        serviceId: 'kb',
+        createdAt: today,
+        owner: c.owner || '周明',
+        steps: {},
+        files: [],
+        executed: {},
+        testRun: { generated: false, ran: false, at: null, marks: {} },
+        report: null,
+      },
+      cfg: { apiKey: '', dataPolicy: false },
+      invited: [],
+      staffQuestions: [],
+      logs: [],
+    };
+  }
+
+  /* 新建客户：写入客户档案 + 生成空白工作空间 */
+  function createClient(form) {
+    const a = loadAdmin();
+    a.seq = (a.seq || 199) + 1;
+    const pid = `P-${new Date().getFullYear()}-${String(a.seq).padStart(4, '0')}`;
+    const d = new Date();
+    const due = new Date();
+    due.setDate(due.getDate() + 30);
+
+    const client = {
+      id: 'c' + Date.now(),
+      pid,
+      org: form.org.trim(),
+      contact: (form.contact || '').trim(),
+      phone: (form.phone || '').trim(),
+      email: (form.email || '').trim(),
+      industry: (form.industry || '').trim(),
+      size: form.size || '11–50 人',
+      city: (form.city || '').trim(),
+      svc: form.svc || '企业 AI 知识库',
+      stage: '待启动',
+      pct: 0,
+      owner: form.owner || '周明',
+      amount: form.amount || '¥18,800',
+      due: fmtDate(due),
+      health: 'good',
+      createdAt: fmtDate(d),
+      note: (form.note || '').trim(),
+    };
+
+    a.clients.unshift(client);
+    saveAdmin(a);
+
+    const st = buildClientState(client);
+    st.project.createdAt = fmtDate(d);
+    try { localStorage.setItem('tm_client_' + client.id, JSON.stringify(st)); } catch (e) { }
+
+    return client;
+  }
+
+  /* 以客户身份进入工作空间：把该客户的状态装载为当前客户端状态 */
+  function enterClient(clientId) {
+    const a = loadAdmin();
+    const c = (a.clients || []).find(x => x.id === clientId);
+    if (!c) return null;
+
+    let st = null;
+    try {
+      const raw = localStorage.getItem('tm_client_' + clientId);
+      if (raw) st = JSON.parse(raw);
+    } catch (e) { }
+
+    // 当前 state 就是这个客户，直接沿用
+    if (!st) {
+      try {
+        const cur = localStorage.getItem(KEY);
+        if (cur) {
+          const p = JSON.parse(cur);
+          if (p.project && p.project.pid === c.pid) st = p;
+        }
+      } catch (e) { }
+    }
+
+    // 演示客户（恒森）且没有快照：重建带进度的种子状态
+    if (!st && c.pid === 'P-2026-0193') {
+      reset();
+      st = load();
+    }
+
+    if (!st) st = buildClientState(c);
+
+    try {
+      localStorage.setItem('tm_client_' + clientId, JSON.stringify(st));
+      localStorage.setItem(KEY, JSON.stringify(st));
+    } catch (e) { }
+    return st;
   }
 
   function reset() {
@@ -768,7 +956,8 @@ const TM = (() => {
     get state() { return state || load(); },
     load, save, reset, seed, defaultState,
     ORG, USER, MEMBERS, SERVICES, STEPS, DOCS, DOC_CATS, TEST_QUESTIONS, MODELS, ASSISTANTS, TESTS, ACTIVITY, TODO,
-    ADMIN_CLIENTS, ASSIST_REQ, TASKS_MINE,
+    ADMIN_CLIENTS, ADMIN_ACCOUNT, ADMIN_KEY, ASSIST_REQ, TASKS_MINE,
+    loadAdmin, saveAdmin, createClient, buildClientState, enterClient,
     stepState, stepStatus, progress, currentStep,
   };
 })();
