@@ -208,6 +208,39 @@ function guessCat(name) {
 
 const docCat = (d) => d.cat || guessCat(d.name);
 
+/* 模型用量统计。以前配置中心显示「482 次 / 1.24M token / ¥5.12」是编的，
+ * 这里记真实调用次数与 token，前端照着显示。 */
+function addUsage(st, usage) {
+  if (!usage || !usage.total) return;
+  st.usage = st.usage || { calls: 0, tokens: 0, byDay: {} };
+  st.usage.calls = (st.usage.calls || 0) + 1;
+  st.usage.tokens = (st.usage.tokens || 0) + usage.total;
+  const day = new Date().toISOString().slice(0, 10);
+  st.usage.byDay = st.usage.byDay || {};
+  st.usage.byDay[day] = (st.usage.byDay[day] || 0) + usage.total;
+}
+
+/* 真正的"答不上来的问题"清单：客户拿这个去补资料。
+ * 按问题去重，最多留 30 条，最近的排前面。 */
+function recordGap(st, question, assistant) {
+  const text = String(question || '').trim().slice(0, 120);
+  if (!text) return;
+  st.portalGaps = st.portalGaps || [];
+  const hit = st.portalGaps.find((g) => g.q === text);
+  if (hit) {
+    hit.n = (hit.n || 1) + 1;
+    hit.at = new Date().toISOString().slice(0, 10);
+    return;
+  }
+  st.portalGaps.unshift({
+    q: text,
+    at: new Date().toISOString().slice(0, 10),
+    n: 1,
+    by: assistant?.name || '',
+  });
+  if (st.portalGaps.length > 30) st.portalGaps.length = 30;
+}
+
 /* 按助手的资料范围过滤检索结果。scope 为空 = 不限制 */
 function filterByScope(hits, assistant, docs) {
   if (!assistant?.scope?.length) return hits;
@@ -752,6 +785,7 @@ async function route(req, res, url) {
     if (!hits.length) {
       st.portalAsks = (st.portalAsks || 0) + 1;
       st.portalMiss = (st.portalMiss || 0) + 1;
+      recordGap(st, q, asst);
       saveState(id, st);
       const scoped = asst?.scope?.length
         ? `「${asst.name}」只查 ${asst.scope.join('、')} 这几类资料，这个问题可能落在它的范围外。`
@@ -762,6 +796,7 @@ async function route(req, res, url) {
         gap: true,
         hits: 0,
         assistant: asst ? { id: asst.id, name: asst.name } : null,
+        gaps: st.portalGaps || [],
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     }
@@ -785,7 +820,11 @@ async function route(req, res, url) {
     try {
       const r = await LLM.answerWithRag(cfg, { question: q, hits, assistant: asst });
       st.portalAsks = (st.portalAsks || 0) + 1;
-      if (r.gap) st.portalMiss = (st.portalMiss || 0) + 1;
+      addUsage(st, r.usage);
+      if (r.gap) {
+        st.portalMiss = (st.portalMiss || 0) + 1;
+        recordGap(st, q, asst);
+      }
       saveState(id, st);
 
       return sendJSON(res, 200, {
@@ -796,6 +835,7 @@ async function route(req, res, url) {
         ms: r.ms,
         model: r.model,
         assistant: asst ? { id: asst.id, name: asst.name, scope: asst.scope } : null,
+        gaps: st.portalGaps || [],
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     } catch (e) {
@@ -907,6 +947,7 @@ async function route(req, res, url) {
 
       try {
         const r = await LLM.answerWithRag(cfg, { question: t.q, hits, assistant: asst });
+        addUsage(st, r.usage);
         results.push({
           ...t,
           answer: r.answer,

@@ -187,8 +187,12 @@ export async function answerWithRag(cfg, { question, hits, assistant }) {
   const r = await chat(cfg, messages);
 
   const text = (r.content || '').trim();
-  // 模型明确说没有 -> 标为资料缺口，不算错误
-  const isGap = /没有找到|未找到|没有相关|无法回答|资料中没有/.test(text) && hits.length === 0;
+  /* 模型明确说没有 = 资料缺口。
+   * 以前还要求 hits.length === 0，等于"检索到片段但片段没用"这种情况不算缺口——
+   * 可客户看到的就是"它答不上来"，那就该记进缺口清单。
+   * 加长度上限，避免把"答完正文后附一句'资料没写请联系销售'"误判成缺口。 */
+  const saysNo = /没有找到|未找到|没有相关|没有这部分|无法回答|资料中没有|知识库里没有/.test(text);
+  const isGap = saysNo && text.length < 320;
 
   return {
     answer: text,

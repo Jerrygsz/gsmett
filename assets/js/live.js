@@ -108,7 +108,8 @@
           id: srv.project.id || S.project.id,
           name: srv.project.name || S.project.name,
           createdAt: srv.project.createdAt || S.project.createdAt,
-          owner: srv.project.owner || S.project.owner,
+          // 服务端没填就是没指派，不能回落到本地默认的演示顾问名
+          owner: srv.project.owner || '',
           // 首次加载以服务端为准；之后才做并集合并（防刚点完还没同步就被覆盖）
           steps: this.firstPaint
             ? (srv.project.steps || {})
@@ -121,6 +122,8 @@
       this.firstPaint = false;
       S.portalAsks = srv.portalAsks || 0;
       S.portalMiss = srv.portalMiss || 0;
+      S.portalGaps = srv.portalGaps || [];
+      S.usage = srv.usage || { calls: 0, tokens: 0, byDay: {} };
       S.feedback = Array.isArray(srv.feedback) ? srv.feedback : (S.feedback || []);
       S.activity = srv.activity || [];
 

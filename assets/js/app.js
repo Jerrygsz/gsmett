@@ -216,7 +216,7 @@
               <div class="proj-card__title">${esc(S.project.name)}</div>
               <div class="proj-card__sub">
                 <span>${esc(S.project.id)}</span><i></i>
-                <span>服务顾问 ${esc(S.project.owner)}</span><i></i>
+                <span>服务顾问 ${esc(S.project.owner || '未指派')}</span><i></i>
                 <span>创建于 ${esc(S.project.createdAt)}</span>
               </div>
             </div>
@@ -1324,15 +1324,17 @@
       const pages = files.reduce((a, f) => a + (f.pages || 0), 0);
       const slices = files.reduce((a, f) => a + (f.slices || 0), 0);
       const ocr = files.filter(f => f.state === 'ocr').length;
+      const orgName = (S.org && (S.org.short || S.org.name)) || '企业';
       const lines = [
-        ['ok', '知识库「恒森产品与销售资料」已创建'],
+        ['ok', `知识库「${orgName} · 内部资料」已创建`],
         ['ok', `文档解析完成 · ${files.length} 份 / ${pages || '—'} 页`],
       ];
-      if (ocr) lines.push(['ok', `OCR 处理完成 · ${ocr} 份扫描件 · 识别率 96.2%`]);
+      /* 系统没有 OCR，也不做向量化（用的是中文 BM25 关键词索引）。
+       * 这里以前写着"OCR 识别率 96.2%""embedding 完成"，都是没有的事。 */
+      if (ocr) lines.push(['warn', `${ocr} 份扫描件读不出文字，需要先转成文字版再上传`]);
       lines.push(
         ['ok', `文本切片完成 · ${slices.toLocaleString('en-US')} 个片段`],
-        ['ok', `向量化完成 · embedding ${slices.toLocaleString('en-US')} / ${slices.toLocaleString('en-US')}`],
-        ['ok', '索引构建完成 · 检索响应 240 ms'],
+        ['ok', '关键词索引构建完成 · 中文 BM25'],
         ['dim', '知识库已就绪，可进入模型配置'],
       );
       return lines;
@@ -2910,6 +2912,19 @@
   }
 
   function cfgModel() {
+    /* 全部读真实配置与用量。以前这里列着「阿里云百炼 qwen-plus」「text-embedding-v3
+     * 向量化模型」「DeepSeek-V3 备用」和「482 次 / 1.24M token / ¥5.12」，
+     * 全是编的——实际只接了一个模型，也没有向量检索。 */
+    const llm = (window.LIVE && window.LIVE.llm) || {};
+    const platform = llm.platform || {};
+    const u = S.usage || { calls: 0, tokens: 0, byDay: {} };
+    const byDay = u.byDay || {};
+    const days = Object.keys(byDay).sort().slice(-7);
+    const peak = Math.max(1, ...days.map((d) => byDay[d] || 0));
+
+    const configured = llm.configured || llm.keyMasked;
+    const fromPlatform = llm.source === 'platform' || (!llm.configured && platform.available);
+
     return `
       <div class="grid g2" style="align-items:start;gap:18px">
         <div class="card card--pad">
@@ -2918,111 +2933,157 @@
               <b class="fs13">当前使用的模型</b>
               <div class="fs11 muted mt4">模型决定回答质量、响应速度和单次成本</div>
             </div>
-            <button class="btn btn--ghost btn--sm" data-act="addModel">${icon('plus')} 添加</button>
+            <button class="btn btn--ghost btn--sm" id="cfgEditModel">${icon('edit')} 更改</button>
           </div>
-          <div class="stack" style="gap:9px">
-            ${MODELS.map(m => `
-              <div class="cfg-row">
-                <span class="cfg-row__ico" style="background:${m.on ? 'var(--brand-50)' : 'var(--surface-3)'};color:${m.on ? 'var(--brand)' : 'var(--text-3)'}">${icon('cpu')}</span>
-                <div class="cfg-row__body">
-                  <b>${esc(m.name)}</b>
-                  <span>${esc(m.vendor)} · ${esc(m.region)} · 上下文 ${esc(m.ctx)} · ${esc(m.cost)}</span>
-                </div>
-                <span class="badge ${m.use === '主模型' ? 'badge--brand' : ''}">${esc(m.use)}</span>
-                <span class="switch ${m.on ? 'is-on' : ''}" data-model="${esc(m.name)}" role="switch" aria-checked="${m.on}"></span>
-              </div>`).join('')}
-          </div>
-          <div class="note mt16">${icon('info')}<span>主模型用于回答生成，向量化模型用于资料检索。更换主模型后建议重新跑一遍测试题。</span></div>
+
+          ${configured ? `
+            <div class="cfg-row">
+              <span class="cfg-row__ico" style="background:var(--brand-50);color:var(--brand)">${icon('cpu')}</span>
+              <div class="cfg-row__body">
+                <b>${esc(llm.provider || platform.provider || '—')} · ${esc(llm.model || platform.model || '—')}</b>
+                <span>${esc((llm.baseURL || platform.baseURL || '').replace(/^https?:\/\//, ''))} · 密钥 ${esc(llm.keyMasked || platform.keyMasked || '已配置')}</span>
+              </div>
+              <span class="badge badge--success badge--dot">可用</span>
+            </div>
+            <div class="note mt16">${icon('info')}<span>${fromPlatform
+              ? '当前用的是平台内置 Key，所有客户共用。填自己的 Key 后优先级更高，费用记在自己账号上。'
+              : '当前用的是你填的 Key，费用记在你自己的服务商账号上。'}</span></div>
+          ` : `
+            <div class="note note--warn">${icon('key')}<span>还没有配置模型。到项目向导第 5 步填一个 API Key，第 7 步才能出题、员工门户才能给出回答。</span></div>
+          `}
+
+          <div class="note mt12" style="background:var(--surface-2)">${icon('search')}<span>资料检索用的是<b>中文关键词索引（BM25）</b>，不需要额外的向量化模型。好处是不用多买一份 embedding 服务，代价是同义词召回靠内置词表，不如语义检索。</span></div>
         </div>
 
         <div class="stack" style="gap:16px">
           <div class="card card--pad">
-            <b class="fs13">近 7 天用量</b>
+            <div class="row--between">
+              <b class="fs13">用量统计</b>
+              <span class="fs11 muted">本机记录</span>
+            </div>
             <div class="row mt12" style="gap:24px">
-              <div><div class="fs11 muted">调用次数</div><div class="fs17 b6 tnum mt4">482</div></div>
-              <div><div class="fs11 muted">消耗 token</div><div class="fs17 b6 tnum mt4">1.24 M</div></div>
-              <div><div class="fs11 muted">预估费用</div><div class="fs17 b6 tnum mt4">¥ 5.12</div></div>
+              <div><div class="fs11 muted">调用次数</div><div class="fs17 b6 tnum mt4">${u.calls || 0}</div></div>
+              <div><div class="fs11 muted">消耗 token</div><div class="fs17 b6 tnum mt4">${(u.tokens || 0).toLocaleString('en-US')}</div></div>
             </div>
-            <div class="mt16" style="display:flex;align-items:flex-end;gap:5px;height:56px">
-              ${[38, 52, 30, 66, 48, 74, 58].map((h, i) => `<div style="flex:1;background:${i === 5 ? 'var(--brand)' : 'var(--brand-100)'};height:${h}%;border-radius:3px 3px 0 0" title="${['周一', '周二', '周三', '周四', '周五', '周六', '周日'][i]}"></div>`).join('')}
-            </div>
-            <div class="row mt8" style="justify-content:space-between;font-size:10px;color:var(--text-4)">
-              ${['一', '二', '三', '四', '五', '六', '日'].map(d => `<span style="flex:1;text-align:center">${d}</span>`).join('')}
-            </div>
+            ${days.length ? `
+              <div class="mt16" style="display:flex;align-items:flex-end;gap:5px;height:56px">
+                ${days.map((d, i) => `<div style="flex:1;background:${i === days.length - 1 ? 'var(--brand)' : 'var(--brand-100)'};height:${Math.max(8, Math.round((byDay[d] || 0) / peak * 100))}%;border-radius:3px 3px 0 0" title="${esc(d)} · ${(byDay[d] || 0).toLocaleString('en-US')} token"></div>`).join('')}
+              </div>
+              <div class="row mt8" style="justify-content:space-between;font-size:10px;color:var(--text-4)">
+                ${days.map(d => `<span style="flex:1;text-align:center">${esc(d.slice(5))}</span>`).join('')}
+              </div>`
+            : `<div class="fs11 muted mt12">还没有调用记录。跑一次测试或问一个问题就会出现。</div>`}
+            <div class="fs11 muted mt12">费用请到服务商后台查看，这里只统计次数和 token。</div>
           </div>
+
           <div class="card card--pad">
             <b class="fs13">回答行为</b>
             <div class="mt12 stack" style="gap:11px">
               ${[['强制引用资料来源', true], ['找不到答案时明确拒答', true], ['允许模型自行补充常识', false]].map(([n, on]) => `
                 <div class="row--between">
-                  <span class="fs12 dim">${n}</span>
-                  <span class="switch ${on ? 'is-on' : ''}" data-toggle="1" role="switch"></span>
+                  <span class="fs12">${n}</span>
+                  <span class="badge ${on ? 'badge--success' : ''}">${on ? '已启用' : '已关闭'}</span>
                 </div>`).join('')}
             </div>
+            <div class="fs11 muted mt12">这三条写死在提示词里，不可关闭——保证回答只依据你上传的资料。</div>
           </div>
         </div>
       </div>`;
   }
 
   function cfgApi() {
+    /* 只读展示真实配置。改 Key 统一走第 5 步，那里有真的连通性测试。
+     * 以前这里放了个假的明文 Key 和"最后校验 2026-11-12 14:22"。 */
+    const llm = (window.LIVE && window.LIVE.llm) || {};
+    const platform = llm.platform || {};
+    const configured = !!(llm.configured || platform.available);
+    const masked = llm.keyMasked || platform.keyMasked || '';
+    const fromPlatform = llm.source === 'platform' || (!llm.configured && platform.available);
+
     return `
       <div class="grid g2" style="align-items:start;gap:18px">
         <div class="card card--pad">
           <div class="row--between mb16">
-            <div><b class="fs13">模型服务授权</b><div class="fs11 muted mt4">密钥加密存储，网页前端不会出现明文</div></div>
-            <span class="badge badge--success badge--dot">已连接</span>
+            <div><b class="fs13">模型服务授权</b><div class="fs11 muted mt4">密钥加密存在本机，网页前端只显示打码</div></div>
+            <span class="badge ${configured ? 'badge--success badge--dot' : ''}">${configured ? '已连接' : '未配置'}</span>
           </div>
-          <div class="field">
-            <label class="field__label">服务商</label>
-            <select class="select"><option>阿里云百炼（境内 · 华东 2）</option><option>DeepSeek（境内）</option><option>OpenAI（境外 · 需评估数据出境）</option></select>
-          </div>
-          <div class="field">
-            <label class="field__label">API 密钥</label>
-            <div class="input-group">
-              <input class="input mono" id="apiKeyInput" value="${esc(S.cfg.apiKey)}" readonly>
-              <button class="btn btn--ghost" id="btnToggleKey" style="flex:0 0 auto">${icon('eye')}</button>
+
+          ${configured ? `
+            <div class="stack" style="gap:0">
+              ${[
+                ['服务商', `${llm.provider || platform.provider || '—'}`],
+                ['模型', `${llm.model || platform.model || '—'}`],
+                ['接口地址', (llm.baseURL || platform.baseURL || '—').replace(/^https?:\/\//, '')],
+                ['API 密钥', masked || '已配置'],
+                ['密钥来源', fromPlatform ? '平台内置（所有客户共用）' : '本企业自己配置'],
+              ].map(([k, v]) => `
+                <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:14px">
+                  <span class="fs12 muted">${k}</span><span class="fs12 b5 mono">${esc(v)}</span>
+                </div>`).join('')}
             </div>
-            <div class="field__hint">最后校验：2026-11-12 14:22 · 往返 1.4 s</div>
-          </div>
-          <div class="row" style="gap:8px">
-            <button class="btn btn--ghost btn--sm" id="btnTestKey">${icon('zap')} 测试连通性</button>
-            <button class="btn btn--quiet btn--sm" id="btnRotateKey">更换密钥</button>
-          </div>
+            <div class="row mt16" style="gap:8px">
+              <button class="btn btn--ghost btn--sm" id="btnGoStep5">${icon('zap')} 去第 5 步测试 / 更换</button>
+            </div>
+          ` : `
+            <div class="note note--warn">${icon('key')}<span>还没有配置模型 Key。到第 5 步填一个，第 7 步才能出题、员工门户才能回答。</span></div>
+            <div class="row mt16"><button class="btn btn--primary btn--sm" id="btnGoStep5">${icon('arrowRight')} 去第 5 步配置</button></div>
+          `}
         </div>
 
         <div class="card card--pad">
-          <b class="fs13">数据处理与授权范围</b>
+          <b class="fs13">数据去了哪里</b>
           <div class="mt12 stack" style="gap:0">
             ${[
-              ['发送到模型的内容', '检索出的资料片段 + 用户问题', true],
-              ['不发送的内容', '原始文件、完整文档、员工身份信息', true],
-              ['模型侧数据保留', '服务商侧不留存（已开启）', true],
-              ['Embedding 是否外发', '是 · 仅发送文本片段用于向量化', true],
-              ['原始文件存储位置', '企业自有电脑（C 盘 / 指定目录）', true],
+              ['发送到模型的内容', '检索出的资料片段 + 用户问题'],
+              ['不发送的内容', '原始文件、其他客户的资料、员工账号信息'],
+              ['资料存放位置', '本机 data/ 目录，不上传云端'],
+              ['密钥存放位置', '本机 data/，加密存储'],
             ].map(([k, v]) => `
-              <div class="row--between" style="padding:9px 0;border-bottom:1px solid var(--border);gap:14px">
-                <span class="fs12 muted" style="flex:0 0 42%">${k}</span>
-                <span class="fs12 b5" style="text-align:right">${v}</span>
+              <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:14px">
+                <span class="fs12 muted">${k}</span><span class="fs12" style="text-align:right">${esc(v)}</span>
               </div>`).join('')}
           </div>
-          <div class="note note--warn mt16">${icon('alert')}<span>即使文件存在企业本地，检索片段与提问仍会发送到模型服务商。这是 RAG 架构的固有数据流，需要企业书面确认。</span></div>
+          <div class="note mt14">${icon('shield')}<span>调用的是你自己填的服务商接口。资料片段会发到该服务商，是否出境取决于你选的接口地址——这是企业自己需要判断的合规问题，平台不替你决定。</span></div>
         </div>
       </div>`;
   }
 
   function cfgKb() {
+    /* 全部读真实索引数据。这里以前写着「1,284 个切片 / 240ms / 覆盖率 82%」
+     * 和三条示例切片，全是编的。 */
+    const kb = (window.LIVE && window.LIVE.kb) || {};
+    const detail = kb.kb || kb;
+    const chunks = detail.chunks || 0;
+    const docsN = detail.docs || 0;
+    const terms = detail.terms || 0;
+    const builtAt = detail.builtAt ? String(detail.builtAt).slice(0, 16).replace('T', ' ') : '';
+    const perDoc = (detail.perDoc || []).slice().sort((a, b) => (b.chunks || 0) - (a.chunks || 0));
+    const orgName = (S.org && (S.org.short || S.org.name)) || '企业';
+
+    if (!chunks) {
+      return `<div class="card card--pad mb16">
+        <div class="row" style="gap:13px">
+          <span class="cfg-row__ico" style="width:38px;height:38px;background:var(--surface-3);color:var(--text-3)">${icon('database')}</span>
+          <div>
+            <b class="fs13">还没有建知识库</b>
+            <div class="fs11 muted mt4">到第 4 步上传资料并点「开始执行」，这里会显示真实的切片与词项数。</div>
+          </div>
+        </div>
+      </div>`;
+    }
+
     return `
       <div class="card card--pad mb16">
         <div class="row--between">
           <div class="row" style="gap:13px">
             <span class="cfg-row__ico" style="width:38px;height:38px;background:var(--brand-50);color:var(--brand)">${icon('database')}</span>
             <div>
-              <b class="fs13">恒森产品与销售资料</b>
-              <div class="fs11 muted mt4">1,284 个切片 · 5 份资料 · 最后构建 2026-11-12 10:14</div>
+              <b class="fs13">${esc(orgName)} · 内部资料</b>
+              <div class="fs11 muted mt4">${chunks.toLocaleString('en-US')} 个切片 · ${docsN} 份资料 · 构建于 ${esc(builtAt)}</div>
             </div>
           </div>
           <div class="row" style="gap:8px">
-            <span class="badge badge--success badge--dot">运行中</span>
+            <span class="badge badge--success badge--dot">可用</span>
             <button class="btn btn--ghost btn--sm" data-act="rebuild">${icon('refresh')} 重建索引</button>
           </div>
         </div>
@@ -3030,9 +3091,9 @@
 
       <div class="grid g3">
         ${[
-          ['切片数量', '1,284', '平均 486 字 / 片'],
-          ['检索响应', '240 ms', '近 7 天 P95 为 380 ms'],
-          ['资料覆盖率', '82%', '有 2 个问题找不到依据'],
+          ['切片数量', chunks.toLocaleString('en-US'), '按页切开，跨页段落已合并'],
+          ['索引词项', terms.toLocaleString('en-US'), '中文 BM25 关键词索引'],
+          ['资料份数', String(docsN), '解析成功并已入库'],
         ].map(([k, v, s]) => `
           <div class="card card--pad">
             <div class="fs11 muted">${k}</div>
@@ -3042,15 +3103,23 @@
       </div>
 
       <div class="card mt16" style="overflow:hidden">
-        <div style="padding:14px 16px;border-bottom:1px solid var(--border)"><b class="fs13">切片质量抽查</b><span class="fs11 muted" style="margin-left:8px">建议每周抽查 3 条</span></div>
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+          <b class="fs13">各资料切片数</b>
+          <span class="fs11 muted" style="margin-left:8px">切片过少通常说明正文没解析出来</span>
+        </div>
         <table class="table">
-          <thead><tr><th style="width:34%">切片来源</th><th>内容预览</th><th style="width:90px">长度</th><th style="width:80px">状态</th></tr></thead>
+          <thead><tr><th>资料</th><th style="width:90px">切片</th><th style="width:70px">页数</th><th style="width:90px">状态</th></tr></thead>
           <tbody>
-            <tr><td class="fs12">产品规格表.xlsx · 第 2 表</td><td class="fs12 muted">HS-2041 棘轮扳手｜材质 CR-V 铬钒钢｜重量 728g｜长度 250mm…</td><td class="fs12 tnum">412 字</td><td><span class="badge badge--success">正常</span></td></tr>
-            <tr><td class="fs12">外贸销售SOP.pdf · P.12</td><td class="fs12 muted">付款方式：新客户 30% 定金 + 见提单副本付尾款；老客户可申请 15 天账期…</td><td class="fs12 tnum">368 字</td><td><span class="badge badge--success">正常</span></td></tr>
-            <tr><td class="fs12">售后政策.pdf · P.5</td><td class="fs12 muted">（OCR 识别）质保期内非人为损坏…更换…运费由…承担…</td><td class="fs12 tnum">294 字</td><td><span class="badge badge--warn">含识别错误</span></td></tr>
+            ${perDoc.length ? perDoc.slice(0, 12).map(d => `
+              <tr>
+                <td class="fs12" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</td>
+                <td class="fs12 tnum">${d.chunks || 0}</td>
+                <td class="fs12 tnum">${d.pages || '—'}</td>
+                <td><span class="badge ${d.chunks > 1 ? 'badge--success' : 'badge--warn'}">${d.chunks > 1 ? '正常' : '偏少'}</span></td>
+              </tr>`).join('') : `<tr><td colspan="4" class="fs12 muted" style="padding:18px">没有资料明细</td></tr>`}
           </tbody>
         </table>
+        ${perDoc.length > 12 ? `<div class="fs11 muted" style="padding:10px 16px">只显示切片最多的 12 份，共 ${perDoc.length} 份</div>` : ''}
       </div>`;
   }
 
@@ -3173,11 +3242,15 @@
             </div>
           </div>
           <div class="card card--pad">
-            <b class="fs13">版本记录</b>
+            <b class="fs13">助手配置</b>
             <div class="tl mt12">
-              <div class="tl-item tl-item--done"><b>v3 · 增加拒答边界 4 条</b><span>陈志强 · 11-12 09:40</span></div>
-              <div class="tl-item tl-item--done"><b>v2 · 强制引用来源</b><span>周明 · 11-11 16:20</span></div>
-              <div class="tl-item"><b>v1 · 初始模板</b><span>系统 · 11-10 11:05</span></div>
+              ${(window.LIVE && window.LIVE.assistants && window.LIVE.assistants.length)
+                ? window.LIVE.assistants.map(a => `
+                    <div class="tl-item tl-item--done">
+                      <b>${esc(a.name)}</b>
+                      <span>${a.prompt ? '已配置专属提示词' : '用默认规则'} · ${esc(a.scope?.join('/') || '全部资料')}</span>
+                    </div>`).join('')
+                : `<div class="tl-item"><b>还没有创建助手</b><span>到第 6 步创建</span></div>`}
             </div>
           </div>
         </div>
@@ -3185,43 +3258,38 @@
   }
 
   function bindCfg(body, tab) {
+    const cem = qi('#cfgEditModel');
+    if (cem) cem.onclick = () => { location.hash = '#wizard/5'; toast('到第 5 步更换模型或 Key'); };
+
     qa('.switch', body).forEach(sw => sw.onclick = () => {
       sw.classList.toggle('is-on');
       toast('设置已保存');
     });
 
-    const tk = qi('#btnToggleKey');
-    if (tk) tk.onclick = () => {
-      const inp = qi('#apiKeyInput');
-      const hidden = inp.value.includes('****');
-      inp.value = hidden ? 'sk-aly-9d2f4a71c8e35b60f7a2' : S.cfg.apiKey;
-      tk.innerHTML = hidden ? icon('eye') : icon('eye');
-      toast(hidden ? '已临时显示，10 秒后自动隐藏' : '已隐藏');
-      if (hidden) setTimeout(() => { inp.value = S.cfg.apiKey; }, 10000);
-    };
-    const bk = qi('#btnTestKey');
-    if (bk) bk.onclick = async () => {
-      bk.disabled = true; bk.innerHTML = icon('refresh') + ' 校验中…';
-      await sleep(1400);
-      bk.disabled = false; bk.innerHTML = icon('zap') + ' 测试连通性';
-      toast('连通正常 · 往返 1.4 s · 剩余额度充足');
-    };
-    const br = qi('#btnRotateKey');
-    if (br) br.onclick = () => modal({
-      title: '更换 API 密钥',
-      desc: '新密钥会在保存后立即生效，旧密钥作废。',
-      body: `<div class="field"><label class="field__label">新的 API 密钥</label><input class="input mono" placeholder="sk-..."></div>
-             <div class="note note--warn">${icon('alert')}<span>密钥将加密存储在后端，不会写入网页代码，也不会出现在日志中。</span></div>`,
-      okText: '保存并校验',
-      onOk: () => toast('密钥已更新并通过校验'),
-    });
+    const g5 = qi('#btnGoStep5');
+    if (g5) g5.onclick = () => { location.hash = '#wizard/5'; };
 
-    qa('[data-act]', body).forEach(b => b.onclick = () => {
+    qa('[data-act]', body).forEach(b => b.onclick = async () => {
       const a = b.dataset.act;
-      if (a === 'rebuild') toast('已提交重建任务，预计 6 分钟完成', 'info');
-      if (a === 'upload') toast('演示环境：资料上传需本地助手配合，见第 3 步说明', 'warn');
-      if (a === 'addModel') toast('演示环境：模型接入由服务顾问配置', 'info');
-      if (a === 'newAssistant') toast('演示环境：新建助手需先完成第 6 步', 'info');
+      if (a === 'rebuild') {
+        if (!(window.LIVE && window.LIVE.on)) return toast('需要连上本地服务才能重建', 'warn');
+        b.disabled = true;
+        const old = b.innerHTML;
+        b.innerHTML = icon('refresh') + ' 重建中…';
+        try {
+          const r = await window.LIVE.buildKb();
+          toast(`索引已重建 · ${r.chunks || 0} 个片段 / ${r.terms || 0} 个词项`);
+          await window.LIVE.reload();
+          window.LIVE.paint();
+          router();
+        } catch (e) {
+          toast('重建失败：' + e.message, 'warn');
+        } finally {
+          b.disabled = false;
+          b.innerHTML = old;
+        }
+      }
+      if (a === 'newAssistant') { location.hash = '#wizard/6'; }
     });
   }
 
@@ -3529,14 +3597,21 @@
   ];
 
   function renderPortal(root) {
-    const hot = ['HS-2041 的重量是多少？', '客户要 30 天账期怎么回复？', '最小起订量和混装规则？', '售后换货运费谁承担？', 'CE 证书编号是多少？'];
-
     const liveOn = !!(window.LIVE && window.LIVE.on);
     const asstList = liveOn ? (window.LIVE.assistants || []) : [];
     if (liveOn && portalAsstId && !asstList.some((a) => a.id === portalAsstId)) portalAsstId = null;
     const curAsst = asstList.find((a) => a.id === portalAsstId) || asstList[0] || null;
     if (curAsst) portalAsstId = curAsst.id;
-    const docN = (S.project.files || []).length;
+    const docN = liveOn ? (window.LIVE.docs || []).length : (S.project.files || []).length;
+
+    /* 快捷问题只在纯演示（非 live）时给样例。真实客户进来不该看到别人的问题。 */
+    const hot = liveOn ? [] : ['HS-2041 的重量是多少？', '客户要 30 天账期怎么回复？', '最小起订量和混装规则？'];
+
+    /* 答不上来的问题：真的记录员工问过、库里也确实没有的，
+     * 以前这里是写死的三条示例，客户会以为系统在替别人算账 */
+    const gaps = liveOn ? (S.portalGaps || []) : [];
+    const orgName = (S.org && (S.org.short || S.org.name)) || '企业';
+    const who = (S.user && S.user.initial) || orgName.slice(0, 1);
 
     root.innerHTML = `<div class="page">
       ${pageHead('员工门户', '这是你团队员工看到的界面。他们不需要理解知识库、切片、模型，只需要问问题。',
@@ -3547,10 +3622,10 @@
           <div class="portal-chat__head">
             <span style="width:30px;height:30px;border-radius:8px;background:var(--brand-50);color:var(--brand);display:grid;place-items:center">${icon('bot')}</span>
             <div style="flex:1">
-              <div class="fs12 b6">${esc(curAsst ? curAsst.name : (liveOn ? '通用助手' : '恒森 · 产品与销售助手'))}</div>
+              <div class="fs12 b6">${esc(curAsst ? curAsst.name : (liveOn ? `${orgName} · 知识库助手` : '演示助手'))}</div>
               <div class="fs11 muted">${liveOn
                 ? `基于 ${docN} 份内部资料${curAsst?.scope?.length ? ` · 只查 ${esc(curAsst.scope.join('/'))}` : ' · 查全部资料'}`
-                : '基于 5 份内部资料 · 回答均标注出处'}</div>
+                : '演示数据 · 未连接本地服务'}</div>
             </div>
             ${liveOn && asstList.length > 1 ? `
               <select class="select" id="portalAsst" style="max-width:190px;height:30px;font-size:11.5px" title="切换助手">
@@ -3560,20 +3635,20 @@
 
           <div class="portal-chat__body" id="chatBody">
             <div class="msg">
-              <span class="msg__av">智</span>
+              <span class="msg__av">${esc(who)}</span>
               <div class="msg__bubble">
-                你好，我是恒森的内部资料助手。产品参数、报价流程、售后政策都可以问我，我会标出答案来自哪份文件。<br><br>
+                你好，我是${esc(orgName)}的内部资料助手。产品参数、报价流程、售后政策都可以问我，我会标出答案来自哪份文件。<br><br>
                 <span class="muted" style="font-size:12px">如果是资料里没有的内容，我会直接告诉你没有，不会猜。</span>
               </div>
             </div>
           </div>
 
           <div class="portal-chat__foot">
-            <div class="prompt-chips">
+            ${hot.length ? `<div class="prompt-chips">
               ${hot.map(q => `<button class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}
-            </div>
+            </div>` : ''}
             <div class="chat-input">
-              <input class="input" id="chatInput" placeholder="问点什么，例如：HS-2041 的重量是多少？">
+              <input class="input" id="chatInput" placeholder="输入你的问题，例如：这个型号配几块电池？">
               <button class="btn btn--primary" id="btnSend" style="width:44px;padding:0">${icon('send')}</button>
             </div>
           </div>
@@ -3593,20 +3668,22 @@
           <div class="card card--pad">
             <div class="row--between mb12">
               <b class="fs12">答不上来的问题</b>
-              <span class="badge badge--warn">3</span>
+              <span class="badge ${gaps.length ? 'badge--warn' : ''}">${gaps.length}</span>
             </div>
-            <div class="stack" style="gap:10px">
-              ${['CE 证书编号是多少？', '欧盟 EPR 注册号在哪里查？', 'HS-1180 的碳刷型号？'].map(q => `
+            <div class="stack" style="gap:10px" id="gapList">
+              ${gaps.length ? gaps.slice(0, 5).map(g => `
                 <div style="font-size:12px;color:var(--text-2);display:flex;gap:7px;line-height:1.5">
-                  <span style="color:var(--warn);flex:0 0 auto;display:flex;margin-top:2px">${icon('help')}</span>${esc(q)}
-                </div>`).join('')}
+                  <span style="color:var(--warn);flex:0 0 auto;display:flex;margin-top:2px">${icon('help')}</span>
+                  <span>${esc(g.q)}${g.n > 1 ? ` <span class="fs11 muted">×${g.n}</span>` : ''}</span>
+                </div>`).join('')
+                : `<div class="fs11 muted">员工问过但资料里没有的问题会记在这里，可以照着这份清单补资料。</div>`}
             </div>
-            <button class="btn btn--ghost btn--sm btn--block mt12" id="btnSuggest">${icon('plus')} 提交资料补充建议</button>
+            ${gaps.length > 5 ? `<div class="fs11 muted mt8">还有 ${gaps.length - 5} 条，见第 8 步</div>` : ''}
           </div>
 
           <div class="note" style="background:var(--surface-2)">
             ${icon('shield')}
-            <span class="fs11">员工只能问答，看不到原始文件和配置。涉及其他客户、成本价的提问会被自动拒绝。</span>
+            <span class="fs11">员工只能问答，看不到原始文件和配置。回答只依据已上传的资料。</span>
           </div>
         </div>
       </div>
@@ -3616,7 +3693,7 @@
     const input = qi('#chatInput');
 
     function pushUser(text) {
-      body.insertAdjacentHTML('beforeend', `<div class="msg msg--user"><span class="msg__av">陈</span><div class="msg__bubble">${esc(text)}</div></div>`);
+      body.insertAdjacentHTML('beforeend', `<div class="msg msg--user"><span class="msg__av">${esc(who)}</span><div class="msg__bubble">${esc(text)}</div></div>`);
       body.scrollTop = body.scrollHeight;
     }
     function pushTyping() {
@@ -3723,85 +3800,83 @@
     };
     input.onkeydown = (e) => { if (e.key === 'Enter') send(input.value); };
     qa('[data-q]').forEach(c => c.onclick = () => send(c.dataset.q));
-    qi('#btnCopyLink').onclick = () => toast('门户链接已复制：maozhiku.cn/h/hensen');
-    qi('#btnSuggest').onclick = () => modal({
-      title: '提交资料补充建议',
-      desc: '管理员会看到哪些问题答不上来，并决定是否补充资料。',
-      body: `<div class="field"><label class="field__label">你问的问题</label><input class="input" placeholder="例如：CE 证书编号是多少？"></div>
-             <div class="field" style="margin-bottom:0"><label class="field__label">你认为应该在哪份资料里</label><input class="input" placeholder="例如：产品认证资料 / 技术部"></div>`,
-      okText: '提交',
-      onOk: () => toast('已提交，管理员会在资料补充时看到'),
-    });
+    qi('#btnCopyLink').onclick = async () => {
+      const id = (window.LIVE && window.LIVE.clientId) || '';
+      const url = id ? `${location.origin}/app.html?c=${id}#portal` : `${location.origin}/app.html#portal`;
+      try {
+        await navigator.clipboard.writeText(url);
+        toast('门户链接已复制，发给员工就行');
+      } catch {
+        modal({
+          title: '门户链接',
+          desc: '复制下面这个地址，发给需要试用的同事。',
+          body: `<input class="input mono" id="portalUrlOut2" value="${esc(url)}" readonly onclick="this.select()">`,
+          okText: '知道了',
+        });
+      }
+    };
   }
 
   /* =====================================================================
      8. 操作与运行记录
      ===================================================================== */
   function renderLogs(root) {
-    const rows = [
-      ['2026-11-12 15:08', '系统', '生成测试报告', '通过率 86% · 50 题', 'info'],
-      ['2026-11-12 10:14', '系统', '知识库索引重建', '1,284 个切片 · 耗时 6 分 21 秒', 'ok'],
-      ['2026-11-12 09:40', '陈志强', '修改提示词 v3', '新增拒答边界 4 条', 'ok'],
-      ['2026-11-11 16:22', '周明（服务顾问）', '查看部署状态', '经授权 · 工单 #A-0193', 'warn'],
-      ['2026-11-11 16:20', '周明（服务顾问）', '修改提示词 v2', '强制引用来源', 'warn'],
-      ['2026-11-11 14:05', '陈志强', '授权服务顾问访问', '范围：部署状态 + 错误日志', 'warn'],
-      ['2026-11-10 11:02', '系统', 'OCR 处理完成', '售后政策.pdf · 识别率 96.2%', 'ok'],
-      ['2026-11-10 09:15', '李婉', '上传资料', '售后政策.pdf · 5.6 MB', 'ok'],
-    ];
-    const auths = [
-      { who: '周明（服务顾问）', scope: '部署状态、错误日志', at: '2026-11-11 14:05', exp: '2026-11-18', on: true },
-      { who: '本地助手（未安装）', scope: '指定文件夹读取', at: '—', exp: '—', on: false },
-    ];
+    /* 全部读真实记录。以前这一页是 8 条编好的示例（陈志强、周明、OCR 96.2%），
+     * 客户会以为自己真做过这些事。 */
+    const acts = (S.activity || []);
+    const consults = (S.members || []).filter(m => /顾问/.test(m.role || ''));
 
     root.innerHTML = `<div class="page page--narrow">
-      ${pageHead('操作与运行记录', '谁在什么时候做了什么，都可以查。授权可以随时撤销。',
-        `<button class="btn btn--ghost btn--sm" id="btnExport">${icon('download')} 导出记录</button>`)}
+      ${pageHead('操作与运行记录', '谁在什么时候做了什么，都可以查。', '')}
 
-      ${sectionHead('当前授权', '2 条记录')}
+      ${sectionHead('外部授权', consults.length ? `${consults.length} 人` : '暂无')}
       <div class="stack" style="gap:10px">
-        ${auths.map((a, i) => `
-          <div class="card card--pad" style="display:flex;align-items:center;gap:14px;${a.on ? '' : 'opacity:.7'}">
-            <span style="width:34px;height:34px;border-radius:9px;background:${a.on ? 'var(--warn-bg)' : 'var(--surface-3)'};color:${a.on ? 'var(--warn)' : 'var(--text-3)'};display:grid;place-items:center;flex:0 0 34px">${icon(a.on ? 'key' : 'lock')}</span>
+        ${consults.length ? consults.map((a) => `
+          <div class="card card--pad" style="display:flex;align-items:center;gap:14px">
+            <span style="width:34px;height:34px;border-radius:9px;background:var(--warn-bg);color:var(--warn);display:grid;place-items:center;flex:0 0 34px">${icon('key')}</span>
             <div style="flex:1">
-              <div class="fs12 b5">${esc(a.who)}</div>
-              <div class="fs11 muted mt4">范围：${esc(a.scope)} · ${a.on ? `授权于 ${esc(a.at)} · 有效至 ${esc(a.exp)}` : '未授权任何范围'}</div>
+              <div class="fs12 b5">${esc(a.name)}${a.email ? ` · ${esc(a.email)}` : ''}</div>
+              <div class="fs11 muted mt4">角色 ${esc(a.role)} · 添加于 ${esc(a.at)}</div>
             </div>
-            ${a.on ? `<button class="btn btn--danger btn--sm" data-revoke="${i}">撤销授权</button>` : '<span class="badge">未启用</span>'}
-          </div>`).join('')}
+            <span class="badge badge--warn badge--dot">可见</span>
+          </div>`).join('')
+        : `<div class="card card--pad fs12 muted">还没有添加任何外部服务顾问。需要时在「成员与权限」里添加，并自行约定可见范围。</div>`}
       </div>
 
-      <div class="note note--info mt16">${icon('shield')}<span>平台<b>没有</b>远程执行命令的能力。服务顾问能看到的只有部署状态和错误日志，看不到文件内容。任何涉及你电脑上文件与服务的操作，都需要本地助手或你本人在场确认。</span></div>
+      <div class="note note--info mt16">${icon('shield')}<span>这个本地服务<b>没有</b>远程执行命令的能力，也不会把资料上传到任何地方。所有文档、索引、对话记录都在这台电脑的 <span class="mono">data/</span> 目录里。</span></div>
 
-      ${sectionHead('操作记录', '近 7 天 · 8 条')}
+      ${sectionHead('操作记录', acts.length ? `最近 ${acts.length} 条` : '还没有记录')}
       <div class="card" style="overflow:hidden">
         <table class="table">
-          <thead><tr><th style="width:150px">时间</th><th style="width:150px">操作人</th><th style="width:180px">动作</th><th>详情</th></tr></thead>
+          <thead><tr><th style="width:120px">时间</th><th style="width:130px">操作人</th><th>动作</th></tr></thead>
           <tbody>
-            ${rows.map(([t, who, act, d, s]) => `
+            ${acts.length ? acts.map((a) => `
               <tr>
-                <td class="fs11 muted mono">${t}</td>
-                <td class="fs12">${esc(who)}</td>
-                <td><span class="fs12 b5">${esc(act)}</span></td>
-                <td class="fs12 muted">${esc(d)}</td>
-              </tr>`).join('')}
+                <td class="fs11 muted mono">${esc(a.t)}</td>
+                <td class="fs12">${esc(a.who)}</td>
+                <td class="fs12">${esc(a.txt)}</td>
+              </tr>`).join('')
+        : `<tr><td colspan="3" class="fs12 muted" style="padding:18px">还没有操作记录。走一遍项目向导，这里会自动记下来。</td></tr>`}
           </tbody>
         </table>
       </div>
     </div>`;
 
-    qa('[data-revoke]').forEach(b => b.onclick = () => modal({
-      title: '撤销服务顾问授权',
-      desc: '撤销后，服务顾问将立即无法查看本项目状态。',
-      body: `<div class="note note--warn">${icon('alert')}<span>正在进行的工单会暂停，需要重新授权才能继续。你可以在任何时候重新授权。</span></div>`,
-      okText: '确认撤销',
-      onOk: () => toast('授权已撤销'),
-    }));
-    qi('#btnExport').onclick = () => toast('操作记录已导出为 CSV');
+    const be = qi('#btnExport');
+    if (be) be.onclick = () => {
+      if (!acts.length) return toast('还没有记录可以导出', 'warn');
+      const csv = ['时间,操作人,动作', ...acts.map(a => `${a.t},${a.who},"${String(a.txt || '').replace(/"/g, '""')}"`)].join('\r\n');
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `操作记录-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('已导出 CSV');
+    };
   }
 
-  /* =====================================================================
-     9. 设置
-     ===================================================================== */
   function renderSettings(root) {
     root.innerHTML = `<div class="page page--narrow">
       ${pageHead('设置', '企业信息、数据存储策略与账号安全。', '')}
@@ -3873,7 +3948,7 @@
               ${[
                 ['当前服务', '企业 AI 知识库 · 标准交付'],
                 ['项目编号', S.project.id],
-                ['服务顾问', '周明 · 138-0013-8000'],
+                ['服务顾问', (S.members || []).filter(m => /顾问/.test(m.role || '')).map(m => `${m.name}${m.email ? ' · ' + m.email : ''}`).join('、') || '未指派'],
                 ['维护期', '交付后 12 个月'],
               ].map(([k, v]) => `
                 <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:14px">
