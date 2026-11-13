@@ -8,6 +8,8 @@ testsample/
 # （data/ 已整体忽略，这几行是防手滑把文件挪到根目录）
 .machine-salt
 config.local.json
+platform.json
+tickets.json
 *.key
 .env
 .env.*

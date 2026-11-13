@@ -121,9 +121,9 @@
     </form>
 
     <div class="demo-card">
-      <b>演示账号</b>
+      <b>初始账号</b>
       <code>admin@maozhiku.com</code> / <code>maozhiku2026</code><br>
-      前端原型，校验在本机完成，没有真实服务端。
+      密码由本机服务端校验，可在「人员管理 → 编辑后台账号」里修改。
       <br>
       <button type="button" class="demo-card__btn" id="btnFillDemo">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
@@ -152,9 +152,10 @@
     </div>
 
     <nav style="display:flex;gap:2px;margin-left:22px">
-      <a href="#" onclick="return false" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:#fff;background:rgba(0,160,147,.16);font-weight:520">总览</a>
+      <a href="#top" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:#fff;background:rgba(0,160,147,.16);font-weight:520">总览</a>
       <a href="#clients" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">客户</a>
       <a href="#projects" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">项目</a>
+      <a href="#people" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">人员</a>
       <a href="#assist" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">协助</a>
     </nav>
 
@@ -164,8 +165,8 @@
     <div style="display:flex;align-items:center;gap:8px;padding-left:12px;border-left:1px solid rgba(255,255,255,.1)">
       <span class="avatar" style="width:28px;height:28px;font-size:11px;background:#1F4A52" id="adAvatar">周</span>
       <div style="line-height:1.2">
-        <div style="font-size:12px;color:#DCE7EA" id="adName">周明</div>
-        <div style="font-size:10px;color:#5F757E">服务商管理员</div>
+        <div style="font-size:12px;color:#DCE7EA" id="adName">管理员</div>
+        <div style="font-size:10px;color:#5F757E" id="adRole">服务商管理员</div>
       </div>
       <button class="btn btn--quiet btn--sm" id="btnLogout" title="退出登录" style="color:#8FA5AD;padding:0 4px">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
@@ -174,7 +175,7 @@
   </div>
 </header>
 
-<div class="page" style="max-width:1320px">
+<div class="page" id="top" style="max-width:1320px">
 
   <div class="page-head">
     <div class="page-head__txt">
@@ -215,6 +216,34 @@
     </table>
   </div>
 
+  <!-- 人员管理：服务商自己的团队 + 各客户的工作人员，都是可增删改的真实数据 -->
+  <div id="people" class="section-head" style="margin-top:26px">
+    <h3>人员管理</h3><span id="peopleHint">—</span>
+    <div class="row" style="gap:8px">
+      <button class="btn btn--ghost btn--sm" id="btnEditAccount">编辑后台账号</button>
+      <button class="btn btn--primary btn--sm" id="btnNewStaff">+ 新增服务商人员</button>
+    </div>
+  </div>
+  <div class="grid g2" style="align-items:start;gap:18px">
+    <div class="card card--pad">
+      <div class="row--between mb12">
+        <div><b class="fs13">服务商团队</b><div class="fs11 muted mt4">这里的人会出现在客户「负责人」下拉里</div></div>
+        <span class="badge" id="staffCount">0 人</span>
+      </div>
+      <div id="staffList" class="stack" style="gap:0"></div>
+    </div>
+    <div class="card card--pad">
+      <div class="row--between mb12">
+        <div><b class="fs13">客户工作人员</b><div class="fs11 muted mt4">选一家客户，管理能使用助手的人</div></div>
+        <button class="btn btn--primary btn--sm" id="btnNewMember">+ 新增成员</button>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <select class="select" id="memberClient"></select>
+      </div>
+      <div id="memberList" class="stack" style="gap:0"></div>
+    </div>
+  </div>
+
   <div class="grid g2 mt24" style="align-items:start;gap:18px">
     <div id="assist">
       <div class="section-head" style="margin-top:0">
@@ -225,7 +254,7 @@
 
     <div id="tasks">
       <div class="section-head" style="margin-top:0">
-        <h3>我的任务</h3><span>本周 6 项</span>
+        <h3>我的任务</h3><span id="taskHint">—</span>
         <div class="row--between"><span class="fs12 muted">按截止时间</span></div>
       </div>
       <div class="card card--pad">
@@ -234,14 +263,14 @@
 
       <div class="card card--pad mt16">
         <div class="row--between mb12">
-          <b class="fs13">交付模板沉淀</b>
-          <span class="badge badge--brand">核心资产</span>
+          <b class="fs13">交付情况</b>
+          <span class="badge badge--brand">真实统计</span>
         </div>
-        <p class="fs12 muted" style="line-height:1.65">每次交付完的项目，步骤里的操作细节、客户常卡住的地方、测试题的命中分布，都会被回收进模板。下一个同类客户可以直接复用，交付周期会一轮比一轮短。</p>
+        <p class="fs12 muted" style="line-height:1.65">下面三个数字全部来自当前系统里的真实客户数据，没有预置模板或估算值。</p>
         <div class="row mt12" style="gap:18px">
-          <div><div class="fs11 muted">已沉淀模板</div><div class="fs15 b6 tnum mt4">3 套</div></div>
-          <div><div class="fs11 muted">复用率</div><div class="fs15 b6 tnum mt4">64%</div></div>
-          <div><div class="fs11 muted">节省工时</div><div class="fs15 b6 tnum mt4">38 h</div></div>
+          <div><div class="fs11 muted">已完成交付</div><div class="fs15 b6 tnum mt4" id="assetDone">—</div></div>
+          <div><div class="fs11 muted">资料总份数</div><div class="fs15 b6 tnum mt4" id="assetDocs">—</div></div>
+          <div><div class="fs11 muted">累计提问</div><div class="fs15 b6 tnum mt4" id="assetAsks">—</div></div>
         </div>
       </div>
     </div>
@@ -259,7 +288,26 @@
 <script>
 (function () {
   const { qi, qa, icon, esc, toast, modal, loadAdmin, saveAdmin, createClient, enterClient,
-          ADMIN_ACCOUNT, ADMIN_KEY, ASSIST_REQ, TASKS_MINE } = TM;
+          ADMIN_ACCOUNT, ADMIN_KEY } = TM;
+
+  /* 服务端真实数据。以前 ASSIST_REQ / TASKS_MINE 是写死的演示数组，已全部弃用 */
+  const PLAT = {
+    account: { email: ADMIN_ACCOUNT.email, name: '管理员', role: '服务商管理员' },
+    staff: [],
+    tickets: [],
+  };
+  let stageFilter = '';        // '' = 全部阶段
+  let memberClientId = '';
+
+  async function api(path, opt) {
+    const r = await fetch(path, {
+      ...(opt || {}),
+      headers: { 'Content-Type': 'application/json', ...((opt && opt.headers) || {}) },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `请求失败（${r.status}）`);
+    return j;
+  }
 
   /* ---------------- 登录 ---------------- */
   const AUTH_FLAG = 'tm_admin_auth';
@@ -277,14 +325,20 @@
   /* 把服务端客户列表同步到本地，原有渲染逻辑不用改 */
   async function syncFromServer() {
     if (!(await API.detect())) return false;
-    const r = await API.clients();
-    if (r.error) throw new Error(r.error);
+    const [cr, profile, sr, tr] = await Promise.all([
+      API.clients(), api('/api/platform/profile'), api('/api/staff'), api('/api/tickets'),
+    ]);
+    if (cr.error) throw new Error(cr.error);
+    PLAT.account = profile.account || PLAT.account;
+    PLAT.staff = sr.staff || [];
+    PLAT.tickets = tr.tickets || [];
     const a = loadAdmin();
-    a.clients = (r.clients || []).map(c => ({
+    a.clients = (cr.clients || []).map(c => ({
       ...c,
       stage: c.stage || '待启动',
       pct: c.pct || 0,
-      amount: c.amount || '¥18,800',
+      // 没填就是空。以前这里默认塞 '¥18,800'，客户会看到一堆编出来的合同金额
+      amount: c.amount || '',
       due: c.due || '—',
       health: c.health || 'good',
       note: c.note || '',
@@ -296,8 +350,9 @@
   async function showApp() {
     qi('#adLogin').style.display = 'none';
     qi('#adApp').style.display = '';
-    qi('#adName').textContent = ADMIN_ACCOUNT.name;
-    qi('#adAvatar').textContent = ADMIN_ACCOUNT.name.slice(0, 1);
+    qi('#adName').textContent = PLAT.account.name || '管理员';
+    qi('#adAvatar').textContent = (PLAT.account.name || '管').slice(0, 1);
+    qi('#adRole').textContent = PLAT.account.role || '服务商管理员';
     try {
       await syncFromServer();
       renderAll();
@@ -307,7 +362,7 @@
       try { localStorage.removeItem(ADMIN_KEY); } catch (e) { }
       try {
         renderAll();
-        toast('检测到本机存有旧版演示数据，已重置为初始状态', 'warn');
+        toast('检测到本机存有旧版缓存数据，已重置为初始状态', 'warn');
       } catch (e2) {
         toast('后台加载失败，请刷新页面或清空浏览器缓存', 'warn');
       }
@@ -364,38 +419,30 @@
     qi(sel).addEventListener('input', clearLoginErr);
   });
 
-  function doLogin() {
-    const email = qi('#admEmail').value.trim().toLowerCase();
+  /* 密码由服务端校验，前端不再内置明文密码 */
+  async function doLogin() {
+    const email = qi('#admEmail').value.trim();
     const pwd = qi('#admPwd').value;
     const btn = qi('#loginForm').querySelector('button[type=submit]');
-
-    if (email !== ADMIN_ACCOUNT.email || pwd !== ADMIN_ACCOUNT.pwd) {
-      const pwdLen = pwd.length;
-      let why = '';
-      if (email !== ADMIN_ACCOUNT.email) {
-        why = '账号不是 <b>admin@maozhiku.com</b>。';
-      } else if (pwdLen !== ADMIN_ACCOUNT.pwd.length) {
-        // 最常见的坑：浏览器把已保存的旧密码自动填进了密码框
-        why = `密码框里现在是 <b>${pwdLen} 位</b>，演示密码是 <b>${ADMIN_ACCOUNT.pwd.length} 位</b>——多半是浏览器自动填了旧密码。`;
-      } else {
-        why = '密码不对，注意大小写，演示密码是 <b>maozhiku2026</b>。';
-      }
-      showLoginErr(`${why}<br><a class="lnk" id="lnkFill">一键填入演示账号并登录</a>`);
-      const lnk = qi('#lnkFill');
-      if (lnk) lnk.onclick = fillDemo;
-      return;
-    }
-
-    clearLoginErr();
     btn.disabled = true;
     btn.textContent = '正在登录…';
-    setTimeout(() => {
+    try {
+      const r = await api('/api/admin/login', {
+        method: 'POST', body: JSON.stringify({ email, pwd }),
+      });
+      PLAT.account = r.account || PLAT.account;
+      clearLoginErr();
       safeSession.set(AUTH_FLAG, '1');
+      await showApp();
+      toast('已登录服务商后台');
+    } catch (e) {
+      showLoginErr(`${esc(e.message)}<br><span class="fs11">如果改过密码，请用新密码登录；没改过可以点这里用初始账号：</span> <a class="lnk" id="lnkFill">一键登录</a>`);
+      const lnk = qi('#lnkFill');
+      if (lnk) lnk.onclick = fillDemo;
+    } finally {
       btn.disabled = false;
       btn.textContent = '登录后台';
-      showApp();
-      toast('已登录服务商后台');
-    }, 400);
+    }
   }
 
   /* 强制写入正确的账号密码再登录，绕开浏览器自动填充 */
@@ -423,21 +470,21 @@
   /* ---------------- 渲染 ---------------- */
   function renderAll() {
     const a = loadAdmin();
-    const cs = a.clients || [];
+    const all = a.clients || [];
+    const cs = stageFilter ? all.filter(c => c.stage === stageFilter) : all;
+    const openTickets = PLAT.tickets.filter(t => t.status !== 'done');
+    const active = all.filter(c => c.stage === '实施中' || c.stage === '验收中').length;
 
-    /* 概览提示 */
-    const active = cs.filter(c => c.stage === '实施中' || c.stage === '验收中').length;
     qi('#overviewHint').textContent =
-      `${cs.length} 个客户 · ${active} 个进行中 · ${ASSIST_REQ.length} 个协助请求待处理。这里是你业务的核心资产：每个项目的交付过程都会沉淀成模板。`;
+      `${all.length} 个客户 · ${active} 个进行中 · ${openTickets.length} 个工单待处理。人员、工单、客户档案都可以在本页直接改。`;
 
-    /* KPI */
-    const total = cs.reduce((n, c) => n + money(c.amount), 0);
-    const avg = cs.length ? Math.round(cs.reduce((n, c) => n + (c.pct || 0), 0) / cs.length) : 0;
+    const total = all.reduce((n, c) => n + money(c.amount), 0);
+    const avg = all.length ? Math.round(all.reduce((n, c) => n + (c.pct || 0), 0) / all.length) : 0;
     qi('#kpiRow').innerHTML = [
-      ['客户总数', String(cs.length), `${cs.filter(c => c.stage === '待启动').length} 个待启动`],
-      ['进行中项目', String(active), `${cs.filter(c => c.stage === '实施中').length} 个实施中`],
-      ['合同总额', '¥ ' + total.toLocaleString('en-US'), `平均进度 ${avg}%`],
-      ['待处理协助', String(ASSIST_REQ.length), `${ASSIST_REQ.filter(r => r.pri === 'high').length} 个高优先`],
+      ['客户总数', String(all.length), `${all.filter(c => c.stage === '待启动').length} 个待启动`],
+      ['进行中项目', String(active), `${all.filter(c => c.stage === '实施中').length} 个实施中`],
+      ['合同总额', total ? '¥ ' + total.toLocaleString('en-US') : '未填写', `平均进度 ${avg}%`],
+      ['待处理工单', String(openTickets.length), `共 ${PLAT.tickets.length} 条记录`],
     ].map(([label, val, sub]) => `
       <div class="admin-kpi">
         <div class="admin-kpi__label">${label}</div>
@@ -445,31 +492,31 @@
         <div class="admin-kpi__delta" style="color:var(--text-3)">${sub}</div>
       </div>`).join('');
 
-    /* 看板 */
+    /* 看板始终显示全量，筛选只作用于下面的客户表 */
     const cols = [
-      ['待启动', cs.filter(c => c.stage === '待启动' || c.stage === '需求确认')],
-      ['实施中', cs.filter(c => c.stage === '实施中')],
-      ['验收中', cs.filter(c => c.stage === '验收中')],
-      ['维护期', cs.filter(c => c.stage === '维护期')],
+      ['待启动', all.filter(c => c.stage === '待启动' || c.stage === '需求确认')],
+      ['实施中', all.filter(c => c.stage === '实施中')],
+      ['验收中', all.filter(c => c.stage === '验收中')],
+      ['维护期', all.filter(c => c.stage === '维护期')],
     ];
-    qi('#kanbanHint').textContent = `共 ${cs.length} 个项目`;
+    qi('#kanbanHint').textContent = `共 ${all.length} 个项目`;
     qi('#kanban').innerHTML = cols.map(([name, arr]) => `
       <div class="kanban__col">
         <div class="kanban__head">${name} <span>${arr.length}</span></div>
         ${arr.map(c => `
           <div class="kanban-card" data-enter="${esc(c.id)}" title="点击以该客户身份进入">
             <b>${esc(c.org)}</b>
-            <div class="fs11 muted">${esc(c.svc)} · ${esc(c.owner)}</div>
+            <div class="fs11 muted">${esc(c.svc)} · ${esc(c.owner || '未指派')}</div>
             <div class="kanban-card__meta">
-              <span>${esc(c.amount)}</span>
+              <span>${esc(c.amount || '金额未填')}</span>
               <span class="badge ${c.pct >= 100 ? 'badge--success' : c.stage === '实施中' ? 'badge--brand' : c.stage === '验收中' ? 'badge--warn' : ''}">${c.pct}%</span>
             </div>
           </div>`).join('')}
         ${arr.length === 0 ? `<div class="fs11 muted" style="text-align:center;padding:14px 0;opacity:.7">暂无</div>` : ''}
       </div>`).join('');
 
-    /* 客户表 */
-    qi('#clientHint').textContent = `${cs.length} 家`;
+    qi('#clientHint').textContent = stageFilter ? `${cs.length} 家 · 已筛选「${stageFilter}」` : `${cs.length} 家`;
+    qi('#btnFilter').textContent = stageFilter ? `筛选：${stageFilter} ✕` : '按阶段筛选';
     qi('#clientRows').innerHTML = cs.map(c => `
       <tr>
         <td>
@@ -489,17 +536,22 @@
             <span class="fs11 tnum b5" style="min-width:28px;text-align:right">${c.pct}%</span>
           </div>
         </td>
-        <td class="fs12">${esc(c.owner)}</td>
-        <td class="fs12 tnum">${esc(c.amount)}</td>
+        <td class="fs12">${esc(c.owner || '未指派')}</td>
+        <td class="fs12 tnum">${esc(c.amount || '未填写')}</td>
         <td class="fs11 muted">${esc(c.due)}</td>
         <td>
           <div class="row" style="gap:4px;justify-content:flex-end">
             <button class="btn btn--ghost btn--sm" data-enter="${esc(c.id)}">进入</button>
+            <button class="btn btn--quiet btn--sm" data-edit-client="${esc(c.id)}">编辑</button>
             <button class="btn btn--quiet btn--sm" style="padding:0 4px" data-info="${esc(c.id)}">${icon('more')}</button>
           </div>
         </td>
-      </tr>`).join('');
+      </tr>`).join('') || `<tr><td colspan="8" style="text-align:center;padding:26px;color:var(--text-3);font-size:12.5px">这个阶段下没有客户</td></tr>`;
 
+    renderPeople();
+    renderAssist();
+    renderTasks();
+    renderAssets(all);
     bind();
   }
 
@@ -509,7 +561,345 @@
       askEnter(b.dataset.enter);
     });
     qa('[data-info]').forEach(b => b.onclick = () => showInfo(b.dataset.info));
-    qa('[data-reply]').forEach(b => b.onclick = () => handleAssist(+b.dataset.reply));
+    qa('[data-edit-client]').forEach(b => b.onclick = () => openClientEditor(b.dataset.editClient));
+    qa('[data-reply]').forEach(b => b.onclick = () => handleAssist(b.dataset.reply));
+    qa('[data-del-ticket]').forEach(b => b.onclick = async () => {
+      try {
+        await api('/api/tickets/' + b.dataset.delTicket, { method: 'DELETE' });
+        PLAT.tickets = PLAT.tickets.filter(t => t.id !== b.dataset.delTicket);
+        renderAll();
+        toast('工单已删除');
+      } catch (e) { toast(e.message, 'warn'); }
+    });
+    qa('[data-edit-staff]').forEach(b => b.onclick = () => openStaffEditor(b.dataset.editStaff));
+    qa('[data-del-staff]').forEach(b => b.onclick = async () => {
+      const s = PLAT.staff.find(x => x.id === b.dataset.delStaff);
+      if (!s) return;
+      modal({
+        title: `删除「${s.name}」`,
+        desc: '只从服务商团队名单里移除，不影响历史客户记录。',
+        body: `<div class="note note--warn">${icon('alert')}<span>删除后，这个人的名字不会再出现在新建客户的负责人下拉里。</span></div>`,
+        okText: '确认删除',
+        onOk: async () => {
+          await api('/api/staff/' + s.id, { method: 'DELETE' });
+          PLAT.staff = PLAT.staff.filter(x => x.id !== s.id);
+          renderAll();
+          toast(`已移除 ${s.name}`);
+        },
+      });
+    });
+  }
+
+  /* ---------------- 人员管理 ---------------- */
+  const TICKET_TYPE = { assist: '人工协助', consult: '服务诊断', service: '开通申请' };
+
+  function renderPeople() {
+    const all = loadAdmin().clients || [];
+    qi('#peopleHint').textContent = `${PLAT.staff.length} 位服务商人员 · ${all.length} 家客户`;
+    qi('#staffCount').textContent = `${PLAT.staff.length} 人`;
+
+    qi('#staffList').innerHTML = PLAT.staff.length
+      ? PLAT.staff.map(s => `
+        <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:10px">
+          <div style="min-width:0">
+            <div class="fs12 b5">${esc(s.name)}
+              <span class="tag tag--outline">${esc(s.role || '未填角色')}</span>
+              ${s.enabled === false ? '<span class="badge">停用</span>' : ''}
+            </div>
+            <div class="fs11 muted mt2">${esc([s.title, s.phone, s.email].filter(Boolean).join(' · ') || '未填联系方式')}</div>
+          </div>
+          <div class="row" style="gap:4px;flex:0 0 auto">
+            <button class="btn btn--quiet btn--sm" data-edit-staff="${esc(s.id)}">编辑</button>
+            <button class="btn btn--quiet btn--sm" data-del-staff="${esc(s.id)}">删除</button>
+          </div>
+        </div>`).join('')
+      : `<div class="empty" style="padding:24px 0;text-align:center;color:var(--text-3);font-size:12.5px">
+           还没有服务商人员。点右上角「新增服务商人员」，添加的人会进到客户负责人下拉里。
+         </div>`;
+
+    const sel = qi('#memberClient');
+    if (!memberClientId || !all.some(c => c.id === memberClientId)) memberClientId = all[0]?.id || '';
+    sel.innerHTML = all.length
+      ? all.map(c => `<option value="${esc(c.id)}" ${c.id === memberClientId ? 'selected' : ''}>${esc(c.org)}</option>`).join('')
+      : `<option value="">（还没有客户）</option>`;
+
+    renderMembers();
+  }
+
+  async function renderMembers() {
+    const box = qi('#memberList');
+    if (!memberClientId) {
+      box.innerHTML = `<div class="empty" style="padding:24px 0;text-align:center;color:var(--text-3);font-size:12.5px">先新建一个客户，才能管理它的工作人员。</div>`;
+      return;
+    }
+    try {
+      const r = await api(`/api/clients/${memberClientId}/members`);
+      const list = r.members || [];
+      box.innerHTML = list.length
+        ? list.map(m => `
+          <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:10px">
+            <div style="min-width:0">
+              <div class="fs12 b5">${esc(m.name)} <span class="tag tag--outline">${esc(m.role || '员工')}</span></div>
+              <div class="fs11 muted mt2">${esc([m.email, m.phone, m.at].filter(Boolean).join(' · ') || '未填联系方式')}</div>
+            </div>
+            <div class="row" style="gap:4px;flex:0 0 auto">
+              <button class="btn btn--quiet btn--sm" data-edit-mem="${esc(m.id)}">编辑</button>
+              <button class="btn btn--quiet btn--sm" data-del-mem="${esc(m.id)}">删除</button>
+            </div>
+          </div>`).join('')
+        : `<div class="empty" style="padding:24px 0;text-align:center;color:var(--text-3);font-size:12.5px">这家客户还没有工作人员。</div>`;
+      qa('[data-edit-mem]').forEach(b => b.onclick = () => openMemberEditor(b.dataset.editMem));
+      qa('[data-del-mem]').forEach(b => b.onclick = () => {
+        const m = list.find(x => x.id === b.dataset.delMem);
+        modal({
+          title: `移除「${m.name}」`,
+          desc: '移除后这个人就不能再使用助手了。',
+          body: `<div class="note note--warn">${icon('alert')}<span>第 8 步「员工试用」的成员人数会跟着变化，人数不足时该步骤会退回进行中。</span></div>`,
+          okText: '确认移除',
+          onOk: async () => {
+            await api(`/api/clients/${memberClientId}/members/${m.id}`, { method: 'DELETE' });
+            renderMembers();
+            toast(`已移除 ${m.name}`);
+          },
+        });
+      });
+    } catch (e) {
+      box.innerHTML = `<div class="note note--warn">${esc(e.message)}</div>`;
+    }
+  }
+
+  function staffFields(s) {
+    return `<div class="grid g2" style="gap:12px">
+      <div class="field"><label class="field__label">姓名 <i class="req">*</i></label>
+        <input class="input" id="stName" value="${esc(s.name || '')}" placeholder="例如 张浩"></div>
+      <div class="field"><label class="field__label">角色</label>
+        <select class="select" id="stRole">
+          ${['服务商管理员', '交付负责人', '服务顾问', '实施工程师', '技术支持'].map(r => `<option ${s.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+        </select></div>
+      <div class="field"><label class="field__label">岗位 / 职称</label>
+        <input class="input" id="stTitle" value="${esc(s.title || '')}" placeholder="例如 华南区实施"></div>
+      <div class="field"><label class="field__label">手机</label>
+        <input class="input" id="stPhone" value="${esc(s.phone || '')}" placeholder="选填"></div>
+      <div class="field"><label class="field__label">邮箱</label>
+        <input class="input" id="stEmail" value="${esc(s.email || '')}" placeholder="选填"></div>
+      <div class="field"><label class="field__label">状态</label>
+        <select class="select" id="stEnabled">
+          <option value="1" ${s.enabled !== false ? 'selected' : ''}>在职</option>
+          <option value="0" ${s.enabled === false ? 'selected' : ''}>停用</option>
+        </select></div>
+    </div>`;
+  }
+
+  function openStaffEditor(id) {
+    const existing = PLAT.staff.find(x => x.id === id);
+    const s = existing || {};
+    modal({
+      title: existing ? `编辑「${existing.name}」` : '新增服务商人员',
+      desc: '添加后，这个人会出现在新建客户时的「负责人」下拉里。',
+      body: staffFields(s),
+      wide: true,
+      okText: existing ? '保存修改' : '添加人员',
+      onOk: async (back) => {
+        const payload = {
+          name: back.querySelector('#stName').value.trim(),
+          role: back.querySelector('#stRole').value,
+          title: back.querySelector('#stTitle').value.trim(),
+          phone: back.querySelector('#stPhone').value.trim(),
+          email: back.querySelector('#stEmail').value.trim(),
+          enabled: back.querySelector('#stEnabled').value === '1',
+        };
+        if (!payload.name) { toast('填一下姓名', 'warn'); return false; }
+        try {
+          const r = existing
+            ? await api('/api/staff/' + existing.id, { method: 'PATCH', body: JSON.stringify(payload) })
+            : await api('/api/staff', { method: 'POST', body: JSON.stringify(payload) });
+          if (existing) PLAT.staff = PLAT.staff.map(x => x.id === existing.id ? r.staff : x);
+          else PLAT.staff.push(r.staff);
+          renderAll();
+          toast(existing ? '人员信息已更新' : `${payload.name} 已加入服务商团队`);
+        } catch (e) { toast(e.message, 'warn'); return false; }
+      },
+    });
+  }
+
+  function openMemberEditor(mid) {
+    api(`/api/clients/${memberClientId}/members`).then(r => {
+      const m = (r.members || []).find(x => x.id === mid);
+      if (!m) return;
+      modal({
+        title: `编辑「${m.name}」`,
+        desc: '角色决定他在客户工作空间里能看到什么。',
+        body: `<div class="grid g2" style="gap:12px">
+            <div class="field"><label class="field__label">姓名 <i class="req">*</i></label>
+              <input class="input" id="meName" value="${esc(m.name || '')}"></div>
+            <div class="field"><label class="field__label">角色</label>
+              <select class="select" id="meRole">
+                ${['企业管理员', '销售主管', '销售员工', '技术', '客服', '服务顾问'].map(x => `<option ${m.role === x ? 'selected' : ''}>${x}</option>`).join('')}
+              </select></div>
+            <div class="field"><label class="field__label">邮箱</label>
+              <input class="input" id="meEmail" value="${esc(m.email || '')}" placeholder="可留空"></div>
+            <div class="field"><label class="field__label">手机</label>
+              <input class="input" id="mePhone" value="${esc(m.phone || '')}" placeholder="可留空"></div>
+          </div>`,
+        wide: true,
+        okText: '保存修改',
+        onOk: async (back) => {
+          const payload = {
+            name: back.querySelector('#meName').value.trim(),
+            role: back.querySelector('#meRole').value,
+            email: back.querySelector('#meEmail').value.trim(),
+            phone: back.querySelector('#mePhone').value.trim(),
+          };
+          if (!payload.name) { toast('姓名不能为空', 'warn'); return false; }
+          try {
+            await api(`/api/clients/${memberClientId}/members/${mid}`, { method: 'PATCH', body: JSON.stringify(payload) });
+            renderMembers();
+            toast('成员信息已更新');
+          } catch (e) { toast(e.message, 'warn'); return false; }
+        },
+      });
+    }).catch(e => toast(e.message, 'warn'));
+  }
+
+  function openAccountEditor() {
+    modal({
+      title: '编辑后台账号',
+      desc: '改的是服务商后台的登录账号与页头显示。密码会加密存在本机。',
+      body: `<div class="grid g2" style="gap:12px">
+          <div class="field"><label class="field__label">显示名称</label>
+            <input class="input" id="acName" value="${esc(PLAT.account.name || '')}"></div>
+          <div class="field"><label class="field__label">角色名称</label>
+            <input class="input" id="acRole" value="${esc(PLAT.account.role || '')}"></div>
+          <div class="field"><label class="field__label">登录邮箱</label>
+            <input class="input" id="acEmail" value="${esc(PLAT.account.email || '')}"></div>
+          <div class="field"><label class="field__label">新密码</label>
+            <input class="input" id="acPwd" type="password" placeholder="不改就留空" autocomplete="new-password"></div>
+        </div>
+        <div class="note note--info mt12">${icon('info')}<span>留空「新密码」表示只改显示信息。改完下次登录就要用新密码。</span></div>`,
+      wide: true,
+      okText: '保存',
+      onOk: async (back) => {
+        const payload = {
+          name: back.querySelector('#acName').value.trim(),
+          role: back.querySelector('#acRole').value.trim(),
+          email: back.querySelector('#acEmail').value.trim(),
+        };
+        const pw = back.querySelector('#acPwd').value;
+        if (pw) payload.pwd = pw;
+        try {
+          const r = await api('/api/platform/profile', { method: 'PATCH', body: JSON.stringify(payload) });
+          PLAT.account = r.account;
+          qi('#adName').textContent = PLAT.account.name;
+          qi('#adAvatar').textContent = PLAT.account.name.slice(0, 1);
+          qi('#adRole').textContent = PLAT.account.role;
+          toast('后台账号已更新');
+        } catch (e) { toast(e.message, 'warn'); return false; }
+      },
+    });
+  }
+
+  function openClientEditor(id) {
+    const c = (loadAdmin().clients || []).find(x => x.id === id);
+    if (!c) return;
+    modal({
+      title: `编辑客户档案`,
+      desc: `${c.org} · ${c.pid}`,
+      body: `<div class="grid g2" style="gap:12px">
+          <div class="field"><label class="field__label">企业名称 <i class="req">*</i></label>
+            <input class="input" id="ceOrg" value="${esc(c.org || '')}"></div>
+          <div class="field"><label class="field__label">联系人</label>
+            <input class="input" id="ceContact" value="${esc(c.contact || '')}"></div>
+          <div class="field"><label class="field__label">手机</label>
+            <input class="input" id="cePhone" value="${esc(c.phone || '')}"></div>
+          <div class="field"><label class="field__label">邮箱</label>
+            <input class="input" id="ceEmail" value="${esc(c.email || '')}"></div>
+          <div class="field"><label class="field__label">合同金额</label>
+            <input class="input" id="ceAmount" value="${esc(c.amount || '')}" placeholder="未填写就不显示金额"></div>
+          <div class="field"><label class="field__label">负责人</label>
+            <select class="select" id="ceOwner">
+              <option value="">未指派</option>
+              ${PLAT.staff.filter(s => s.enabled !== false).map(s => `<option value="${esc(s.name)}" ${c.owner === s.name ? 'selected' : ''}>${esc(s.name)} · ${esc(s.role)}</option>`).join('')}
+            </select></div>
+          <div class="field"><label class="field__label">计划交付</label>
+            <input class="input" id="ceDue" value="${esc(c.due === '—' ? '' : c.due || '')}" placeholder="例如 2026-12-31"></div>
+          <div class="field"><label class="field__label">所在城市</label>
+            <input class="input" id="ceCity" value="${esc(c.city || '')}"></div>
+        </div>
+        <div class="field" style="margin-bottom:0"><label class="field__label">备注</label>
+          <textarea class="textarea" id="ceNote" placeholder="资料现状、团队情况、特殊要求">${esc(c.note || '')}</textarea></div>`,
+      wide: true,
+      okText: '保存档案',
+      onOk: async (back) => {
+        const payload = {};
+        for (const [k, sel] of [['org', '#ceOrg'], ['contact', '#ceContact'], ['phone', '#cePhone'],
+          ['email', '#ceEmail'], ['amount', '#ceAmount'], ['owner', '#ceOwner'],
+          ['due', '#ceDue'], ['city', '#ceCity'], ['note', '#ceNote']]) {
+          payload[k] = back.querySelector(sel).value.trim();
+        }
+        if (!payload.org) { toast('企业名称不能为空', 'warn'); return false; }
+        try {
+          await api('/api/clients/' + id, { method: 'PATCH', body: JSON.stringify(payload) });
+          await syncFromServer();
+          renderAll();
+          toast('客户档案已更新');
+        } catch (e) { toast(e.message, 'warn'); return false; }
+      },
+    });
+  }
+
+  /* ---------------- 工单 / 任务 / 统计 ---------------- */
+  function renderAssist() {
+    const open = PLAT.tickets.filter(t => t.status !== 'done');
+    qi('#assistHint').textContent = open.length ? `${open.length} 个待处理` : '暂无';
+    qi('#assistBadge').textContent = open.length ? `${open.length} 个协助请求` : '无协助请求';
+    qi('#assistList').innerHTML = PLAT.tickets.length
+      ? PLAT.tickets.slice(0, 10).map(t => `
+        <div class="assist-item">
+          <span class="assist-item__pri ${t.status !== 'done' ? 'assist-item__pri--high' : ''}"></span>
+          <div style="flex:1;min-width:0">
+            <div class="row--between" style="gap:10px">
+              <b class="fs12">${esc(t.org)} · ${esc((t.title || '').slice(0, 28))}</b>
+              <span class="fs11 muted" style="flex:0 0 auto">${t.status === 'done' ? '已处理' : '待处理'}</span>
+            </div>
+            <p class="fs12 muted mt4" style="line-height:1.6">${esc(t.detail || (t.title || '（没写详情）'))}</p>
+            <div class="row mt8" style="gap:8px">
+              <span class="tag tag--outline">${esc(TICKET_TYPE[t.type] || t.type)}</span>
+              <span class="fs11 muted">${esc((t.createdAt || '').slice(0, 10))}</span>
+              ${t.status !== 'done' ? `<button class="btn btn--ghost btn--sm" data-reply="${esc(t.id)}">处理</button>` : ''}
+              <button class="btn btn--quiet btn--sm" data-del-ticket="${esc(t.id)}">删除</button>
+            </div>
+          </div>
+        </div>`).join('')
+      : `<div class="empty" style="padding:26px 0;text-align:center;color:var(--text-3);font-size:12.5px">
+           暂无工单。客户在项目里点「申请人工协助 / 预约诊断 / 开通申请」后，会真实出现在这里。
+         </div>`;
+  }
+
+  function renderTasks() {
+    const all = loadAdmin().clients || [];
+    const tasks = [];
+    PLAT.tickets.filter(t => t.status !== 'done').forEach(t => tasks.push({
+      txt: `${t.org} · ${(t.title || '').slice(0, 22)}`, who: TICKET_TYPE[t.type] || '工单',
+      due: (t.createdAt || '').slice(5, 10), done: false,
+    }));
+    all.filter(c => (c.pct || 0) < 100).slice(0, 6).forEach(c => tasks.push({
+      txt: `${c.org} · 进度 ${c.pct || 0}%（已完成 ${c.doneSteps || 0} 步）`,
+      who: c.owner || '未指派', due: c.due || '—', done: false,
+    }));
+    qi('#taskHint').textContent = `${tasks.length} 项待办`;
+    qi('#taskList').innerHTML = tasks.length
+      ? tasks.map(t => `
+        <div class="todo-item">
+          <span class="todo-item__ico" style="background:var(--surface-3);color:var(--text-3)">${icon('clock')}</span>
+          <div class="todo-item__body"><b>${esc(t.txt)}</b><span>${esc(t.who)} · ${esc(t.due)}</span></div>
+        </div>`).join('')
+      : `<div style="padding:24px 0;text-align:center;color:var(--text-3);font-size:12.5px">暂无待办。新建客户或收到工单后会自动出现。</div>`;
+  }
+
+  function renderAssets(all) {
+    qi('#assetDone').textContent = all.filter(c => (c.pct || 0) >= 100).length + ' 个';
+    qi('#assetDocs').textContent = all.reduce((n, c) => n + (c.docs || 0), 0) + ' 份';
+    qi('#assetAsks').textContent = all.reduce((n, c) => n + (c.asks || 0), 0) + ' 次';
   }
 
   /* 进入客户工作空间 */
@@ -528,7 +918,7 @@
           ].map(([k, v]) => `<div class="row--between" style="padding:9px 0;border-bottom:1px solid var(--border)">
             <span class="fs12 muted">${k}</span><span class="fs12 b5">${esc(v)}</span></div>`).join('')}
         </div>
-        <div class="note note--info mt16">${icon('info')}<span>当前浏览器里其他客户的演示状态会被替换，但不会丢失——数据按客户分存，从后台可以随时切回去。</span></div>`,
+        <div class="note note--info mt16">${icon('info')}<span>每个客户的数据按客户分存，互不影响。从后台的客户列表随时可以切到别的企业。</span></div>`,
       okText: '进入工作空间',
       cancelText: '取消',
       onOk: () => {
@@ -566,7 +956,7 @@
 
   /* 新建客户 */
   qi('#btnNewClient').onclick = () => {
-    const svcPrice = { '企业 AI 知识库': '¥18,800', 'AI 外贸销售助手': '¥12,600', '企业 AI 培训系统': '¥8,800' };
+    const svcList = ['企业 AI 知识库', 'AI 外贸销售助手', '企业 AI 培训系统'];
 
     modal({
       title: '新建客户',
@@ -588,11 +978,14 @@
           <div class="field"><label class="field__label">所在城市</label>
             <input class="input" id="ncCity" placeholder="例如 深圳 · 宝安"></div>
           <div class="field"><label class="field__label">购买服务</label>
-            <select class="select" id="ncSvc">${Object.keys(svcPrice).map(s => `<option>${s}</option>`).join('')}</select></div>
+            <select class="select" id="ncSvc">${svcList.map(s => `<option>${s}</option>`).join('')}</select></div>
           <div class="field"><label class="field__label">合同金额</label>
-            <input class="input" id="ncAmount" value="¥18,800"></div>
+            <input class="input" id="ncAmount" placeholder="没定就留空，不编一个金额出来"></div>
           <div class="field"><label class="field__label">负责人</label>
-            <select class="select" id="ncOwner"><option>周明</option><option>林可</option></select></div>
+            <select class="select" id="ncOwner">
+              <option value="">未指派</option>
+              ${PLAT.staff.filter(s => s.enabled !== false).map(s => `<option value="${esc(s.name)}">${esc(s.name)} · ${esc(s.role)}</option>`).join('')}
+            </select></div>
         </div>
         <div class="field" style="margin-bottom:0"><label class="field__label">备注</label>
           <textarea class="textarea" id="ncNote" placeholder="资料现状、团队情况、特殊要求"></textarea></div>`,
@@ -620,6 +1013,8 @@
           city: back.querySelector('#ncCity').value,
           svc: back.querySelector('#ncSvc').value,
           owner: back.querySelector('#ncOwner').value,
+          amount: back.querySelector('#ncAmount').value.trim(),
+          note: back.querySelector('#ncNote').value.trim(),
         });
         if (r.error) { toast('创建失败：' + r.error, 'warn'); return false; }
         const client = r.client;
@@ -640,70 +1035,127 @@
         }, 320);
       },
     });
-
-    // 服务与金额联动
-    setTimeout(() => {
-      const svc = qi('#ncSvc'), amt = qi('#ncAmount');
-      if (!svc || !amt) return;
-      svc.onchange = () => { amt.value = svcPrice[svc.value] || '¥18,800'; };
-    }, 60);
   };
 
-  /* 协助请求 */
-  qi('#assistList').innerHTML = ASSIST_REQ.length
-    ? ASSIST_REQ.map((a, i) => `
-    <div class="assist-item">
-      <span class="assist-item__pri ${a.pri === 'high' ? 'assist-item__pri--high' : ''}"></span>
-      <div style="flex:1;min-width:0">
-        <div class="row--between" style="gap:10px">
-          <b class="fs12">${esc(a.org)}</b>
-          <span class="fs11 muted" style="flex:0 0 auto">${esc(a.wait)}</span>
-        </div>
-        <p class="fs12 muted mt4" style="line-height:1.6">${esc(a.issue)}</p>
-        <div class="row mt8" style="gap:8px">
-          <span class="tag tag--outline">${esc(a.owner)}</span>
-          <button class="btn btn--ghost btn--sm" data-reply="${i}">处理</button>
-        </div>
-      </div>
-    </div>`).join('')
-    : `<div class="empty" style="padding:26px 0;text-align:center;color:var(--text-3);font-size:12.5px">
-         暂无协助请求。客户在项目里点「申请人工协助」后会出现在这里。
-       </div>`;
-
-  qi('#assistHint').textContent = ASSIST_REQ.length ? `${ASSIST_REQ.length} 个待处理` : '暂无';
-  qi('#assistBadge').textContent = ASSIST_REQ.length ? `${ASSIST_REQ.length} 个协助请求` : '无协助请求';
-
-  function handleAssist(i) {
-    const a = ASSIST_REQ[i];
+  /* 处理工单：真的改服务端状态，不是弹一句 toast 就算完 */
+  function handleAssist(tid) {
+    const t = PLAT.tickets.find(x => x.id === tid);
+    if (!t) return;
     modal({
-      title: `处理协助：${a.org}`,
-      desc: a.issue,
+      title: `处理工单：${t.org}`,
+      desc: t.title,
       body: `<div class="note note--info mb16">${icon('info')}<span>你可以在客户授权范围内查看部署状态与错误日志，但不能执行远程命令。需要操作客户电脑时，请预约远程会议或引导客户自行操作。</span></div>
-        <div class="field"><label class="field__label">处理方式</label><select class="select">
-          <option>查看日志后给出方案</option><option>预约远程会议（客户共享屏幕）</option><option>引导客户自行操作</option><option>调整交付方案</option>
-        </select></div>
-        <div class="field" style="margin-bottom:0"><label class="field__label">给客户的回复</label><textarea class="textarea" placeholder="用客户能听懂的话说明原因和下一步"></textarea></div>`,
-      okText: '提交回复',
-      onOk: () => toast('已回复客户，工单转为等待客户确认'),
+        <div class="field"><label class="field__label">客户写的问题</label>
+          <div class="fs12 muted" style="line-height:1.7;padding:10px 12px;background:var(--surface-2);border-radius:8px">${esc(t.detail || t.title || '（没写详情）')}</div></div>
+        <div class="field"><label class="field__label">处理方式</label>
+          <select class="select" id="tkWay">
+            <option>查看日志后给出方案</option><option>预约远程会议（客户共享屏幕）</option>
+            <option>引导客户自行操作</option><option>调整交付方案</option>
+          </select></div>
+        <div class="field" style="margin-bottom:0"><label class="field__label">给客户的回复 <i class="req">*</i></label>
+          <textarea class="textarea" id="tkReply" placeholder="用客户能听懂的话说明原因和下一步"></textarea></div>`,
+      wide: true,
+      okText: '提交并标记完成',
+      onOk: async (back) => {
+        const reply = back.querySelector('#tkReply').value.trim();
+        if (!reply) { toast('写一句给客户的回复', 'warn'); return false; }
+        const way = back.querySelector('#tkWay').value;
+        try {
+          const r = await api('/api/tickets/' + tid, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'done', reply: `【${way}】${reply}`, handler: PLAT.account.name }),
+          });
+          PLAT.tickets = PLAT.tickets.map(x => x.id === tid ? r.ticket : x);
+          renderAll();
+          toast('工单已处理完成，回复已存档');
+        } catch (e) { toast(e.message, 'warn'); return false; }
+      },
     });
   }
 
-  /* 我的任务 */
-  qi('#taskList').innerHTML = TASKS_MINE.length
-    ? TASKS_MINE.map(t => `
-    <div class="todo-item" style="${t.done ? 'opacity:.5' : ''}">
-      <span class="todo-item__ico" style="background:${t.done ? 'var(--success-bg)' : 'var(--surface-3)'};color:${t.done ? 'var(--success)' : 'var(--text-3)'}">
-        ${icon(t.done ? 'check' : 'clock')}
-      </span>
-      <div class="todo-item__body">
-        <b style="${t.done ? 'text-decoration:line-through' : ''}">${esc(t.txt)}</b>
-        <span>${esc(t.who)} · ${esc(t.due)}</span>
-      </div>
-    </div>`).join('')
-    : `<div style="padding:24px 0;text-align:center;color:var(--text-3);font-size:12.5px">暂无待办。新建客户后，待办会随项目进度自动生成。</div>`;
+  /* 导出周报：真的下载一份 CSV，内容全部来自当前真实数据 */
+  function exportWeekly() {
+    const all = loadAdmin().clients || [];
+    const rows = [];
+    const put = (...cells) => rows.push(cells);
+    put('贸智库服务商周报', '导出时间 ' + new Date().toLocaleString('zh-CN'));
+    put('');
+    put('【客户】企业', '项目编号', '联系人', '阶段', '进度', '负责人', '合同金额', '资料数', '提问数', '计划交付');
+    if (!all.length) put('（暂无客户）');
+    all.forEach(c => put(c.org, c.pid, c.contact, c.stage, (c.pct || 0) + '%', c.owner || '未指派',
+      c.amount || '未填写', c.docs || 0, c.asks || 0, c.due || '—'));
+    put('');
+    put('【工单】企业', '类型', '问题', '状态', '处理人', '回复', '提交时间');
+    if (!PLAT.tickets.length) put('（暂无工单）');
+    PLAT.tickets.forEach(t => put(t.org, TICKET_TYPE[t.type] || t.type, t.title,
+      t.status === 'done' ? '已处理' : '待处理', t.handler || '—', t.reply || '—', (t.createdAt || '').slice(0, 16).replace('T', ' ')));
+    put('');
+    put('【服务商人员】姓名', '角色', '岗位', '手机', '邮箱', '状态');
+    if (!PLAT.staff.length) put('（暂无人员）');
+    PLAT.staff.forEach(s => put(s.name, s.role, s.title, s.phone, s.email, s.enabled === false ? '停用' : '在职'));
 
-  qi('#btnExport').onclick = () => toast('周报已生成，包含项目进度与协助响应时长');
-  qi('#btnFilter').onclick = () => toast('演示环境：筛选未接入', 'info');
+    const csv = '\uFEFF' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `贸智库周报-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    toast(`周报已下载：${all.length} 家客户 / ${PLAT.tickets.length} 条工单 / ${PLAT.staff.length} 位人员`);
+  }
+
+  /* 阶段筛选：真的过滤客户表，再点一次回到全部 */
+  const STAGES = ['待启动', '实施中', '验收中', '维护期'];
+  qi('#btnFilter').onclick = () => {
+    const i = STAGES.indexOf(stageFilter);
+    stageFilter = i < 0 ? STAGES[0] : (i + 1 < STAGES.length ? STAGES[i + 1] : '');
+    renderAll();
+    toast(stageFilter ? `只看「${stageFilter}」` : '已显示全部阶段');
+  };
+
+  qi('#btnExport').onclick = exportWeekly;
+  qi('#btnNewStaff').onclick = () => openStaffEditor(null);
+  qi('#btnEditAccount').onclick = openAccountEditor;
+  qi('#memberClient').onchange = (e) => { memberClientId = e.target.value; renderMembers(); };
+
+  qi('#btnNewMember').onclick = () => {
+    if (!memberClientId) return toast('先新建一个客户', 'warn');
+    modal({
+      title: '新增客户工作人员',
+      desc: '加进来就能用员工门户提问；系统不发邮件，链接由你转交。',
+      body: `<div class="grid g2" style="gap:12px">
+          <div class="field"><label class="field__label">姓名 <i class="req">*</i></label>
+            <input class="input" id="nmName" placeholder="例如 张浩"></div>
+          <div class="field"><label class="field__label">角色</label>
+            <select class="select" id="nmRole">
+              <option>销售员工</option><option>销售主管</option><option>技术</option><option>客服</option><option>企业管理员</option>
+            </select></div>
+          <div class="field"><label class="field__label">邮箱</label>
+            <input class="input" id="nmEmail" placeholder="可留空"></div>
+          <div class="field"><label class="field__label">手机</label>
+            <input class="input" id="nmPhone" placeholder="可留空"></div>
+        </div>`,
+      wide: true,
+      okText: '添加成员',
+      onOk: async (back) => {
+        const payload = {
+          name: back.querySelector('#nmName').value.trim(),
+          role: back.querySelector('#nmRole').value,
+          email: back.querySelector('#nmEmail').value.trim(),
+          phone: back.querySelector('#nmPhone').value.trim(),
+        };
+        if (!payload.name) { toast('填一下姓名', 'warn'); return false; }
+        try {
+          await api(`/api/clients/${memberClientId}/members`, { method: 'POST', body: JSON.stringify(payload) });
+          renderMembers();
+          toast(`${payload.name} 已加入，把门户链接发给对方就能用`);
+        } catch (e) { toast(e.message, 'warn'); return false; }
+      },
+    });
+  };
 })();
 </script>
 </body>

@@ -50,7 +50,7 @@
           <span class="auth__flow-num">3</span>
           <div class="auth__flow-txt">
             <b>测试通过才算交付</b>
-            <span>50 道业务测试题，通过率到 85% 才进入验收</span>
+            <span>由模型从你的资料里出题，逐题核对，通过率达标才进入验收</span>
           </div>
         </div>
         <div class="auth__flow-item">
@@ -72,32 +72,22 @@
   <!-- 表单区 -->
   <main class="auth__form">
     <div class="auth__box">
-      <h1 id="authTitle">登录你的企业工作空间</h1>
-      <p id="authSub">用企业邮箱登录，或使用下方演示账号直接体验完整流程。</p>
+      <h1 id="authTitle">进入企业工作空间</h1>
+      <p id="authSub">选择已有企业直接进入，或新建一个空白工作空间从零开始。</p>
 
       <div class="auth__tabs">
-        <button class="auth__tab is-active" data-tab="login">登录</button>
-        <button class="auth__tab" data-tab="reg">注册企业</button>
+        <button class="auth__tab is-active" data-tab="login">已有企业</button>
+        <button class="auth__tab" data-tab="reg">新建企业</button>
       </div>
 
-      <!-- 登录 -->
-      <form id="formLogin" autocomplete="off">
-        <div class="field">
-          <label class="field__label" for="loginEmail">企业邮箱</label>
-          <input class="input" id="loginEmail" type="email" value="chen@hensen-tools.com" placeholder="name@company.com">
+      <!-- 已有企业：客户列表来自本地服务，不再是随便填密码就能进的假登录 -->
+      <div id="formLogin" autocomplete="off">
+        <div id="clientPicker" class="stack" style="gap:8px"></div>
+        <div class="note note--info mt12">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9.5"/><path d="M12 16v-4.5M12 8h.01"/></svg>
+          <span>这个页面不设登录密码。客户工作空间由服务商后台统一管理，员工用门户链接访问。要管理客户与人员，请进服务商后台。</span>
         </div>
-        <div class="field">
-          <label class="field__label" for="loginPwd">密码</label>
-          <input class="input" id="loginPwd" type="password" autocomplete="new-password" value="demo2026" placeholder="demo2026">
-          <div class="field__hint" style="display:flex;justify-content:space-between">
-            <span>演示环境已预填，可直接登录</span>
-            <a href="#" style="color:var(--brand)">忘记密码</a>
-          </div>
-        </div>
-        <button class="btn btn--primary btn--lg btn--block" type="submit" style="margin-top:18px">
-          登录工作空间
-        </button>
-      </form>
+      </div>
 
       <!-- 注册 -->
       <form id="formReg" autocomplete="off" style="display:none">
@@ -124,10 +114,6 @@
           <label class="field__label" for="regEmail">企业邮箱</label>
           <input class="input" id="regEmail" type="email" placeholder="name@company.com">
         </div>
-        <div class="field">
-          <label class="field__label" for="regPwd">设置密码</label>
-          <input class="input" id="regPwd" type="password" placeholder="至少 8 位，含字母与数字">
-        </div>
         <div class="note note--brand" style="margin-top:4px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9.5"/><path d="M12 16v-4.5M12 8h.01"/></svg>
           <span>注册后会先建立独立的企业工作空间，你在里面的资料、项目、成员都与其他企业相互隔离。</span>
@@ -139,14 +125,14 @@
 
       <div class="auth__divider">或者</div>
 
-      <button class="btn btn--ghost btn--block" id="btnDemo">
+      <a class="btn btn--ghost btn--block" href="admin.html" id="btnDemo" style="text-decoration:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M6 3.5 20 12 6 20.5z"/></svg>
-        进入演示：恒森进出口（进行中项目）
-      </button>
+        进入服务商后台（管理客户与人员）
+      </a>
 
       <div class="demo-card">
-        <b>这是产品原型，不是正式环境</b>
-        所有数据保存在你本机浏览器，刷新不丢，可随时在设置里重置。演示企业已有一个进行到第 6 步的知识库项目，你可以直接往下走完整个交付流程。
+        <b>数据都在这台电脑上</b>
+        客户、资料、知识库索引、测试记录都保存在本机 data/ 目录，不上传云端，也不会随代码发布到 GitHub。想全部清空，用项目目录里的「清空所有数据.bat」。
       </div>
 
       <p style="text-align:center;margin-top:14px;font-size:11.5px;color:var(--text-3);line-height:1.6">
@@ -154,8 +140,8 @@
       </p>
 
       <p class="auth__legal">
-        继续即表示同意 <a href="#">服务条款</a> 与 <a href="#">数据处理协议</a>。<br>
-        企业资料默认存储在企业自有环境，平台仅保存项目流程与状态信息。
+        客户资料、知识库索引与测试记录都保存在这台电脑的 data/ 目录，不上传云端。<br>
+        模型调用仅发送检索到的文本片段，不发送原始文件。
       </p>
     </div>
   </main>
@@ -165,12 +151,12 @@
 <script src="assets/js/api.js"></script>
 <script>
 (function () {
-  const { qi, qa, toast } = TM;
+  const { qi, qa, toast, esc, icon } = TM;
 
   /* 切换登录 / 注册 */
   const titles = {
-    login: ['登录你的企业工作空间', '用企业邮箱登录，或使用下方演示账号直接体验完整流程。'],
-    reg: ['创建企业工作空间', '先建立独立空间，再选服务。资料、项目、成员都只对本企业可见。'],
+    login: ['进入企业工作空间', '选择已有企业直接进入，客户列表来自本机服务。'],
+    reg: ['新建企业工作空间', '会建立一个空白空间，资料、项目、成员都从零开始。'],
   };
   qa('.auth__tab').forEach(tab => {
     tab.onclick = () => {
@@ -200,22 +186,36 @@
     location.href = target || 'app.html';
   }
 
-  qi('#formLogin').onsubmit = (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button[type=submit]');
-    btn.disabled = true;
-    btn.textContent = '正在进入工作空间…';
-    setTimeout(() => go('app.html'), 520);
-  };
+  /* 已有企业：列出服务端真实客户，点一个就进，不再有随便填密码的假登录 */
+  async function loadClients() {
+    const box = qi('#clientPicker');
+    if (!box) return;
+    box.innerHTML = '<div class="fs12 muted" style="padding:12px 0">正在读取本机客户列表…</div>';
+    try {
+      if (!(await API.detect())) throw new Error('本地服务未启动');
+      const r = await API.clients();
+      const list = r.clients || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="note note--warn">${icon('alert')}<span>还没有客户。切到「新建企业」，或在服务商后台创建。</span></div>`;
+        return;
+      }
+      box.innerHTML = list.map(c => `
+        <a class="btn btn--ghost btn--block" href="app.html?c=${encodeURIComponent(c.id)}" style="justify-content:space-between;text-decoration:none;padding:12px 14px">
+          <span style="text-align:left"><b>${esc(c.org)}</b><br><span class="fs11 muted">${esc(c.contact || '')} · ${esc(c.pid || '')}</span></span>
+          <span class="badge ${c.pct >= 100 ? 'badge--success' : ''}">${c.pct || 0}%</span>
+        </a>`).join('');
+    } catch (e) {
+      box.innerHTML = `<div class="note note--warn"><span>读不到客户列表：${esc(e.message)}。请先双击「启动服务.bat」。</span></div>`;
+    }
+  }
+  loadClients();
 
   qi('#formReg').onsubmit = async (e) => {
     e.preventDefault();
     const org = qi('#regOrg').value.trim();
     const name = qi('#regName').value.trim();
     const email = qi('#regEmail').value.trim();
-    const pwd = qi('#regPwd').value;
-    if (!org || !name || !email || !pwd) { toast('请把企业名称、姓名、邮箱和密码填完整', 'warn'); return; }
-    if (pwd.length < 8) { toast('密码至少 8 位', 'warn'); return; }
+    if (!org || !name || !email) { toast('请把企业名称、姓名和邮箱填完整', 'warn'); return; }
 
     // 新注册企业：清空进度与演示数据，从第 1 步开始
     TM.reset();
@@ -284,12 +284,6 @@
     setTimeout(() => go('app.html'), 700);
   };
 
-  qi('#btnDemo').onclick = () => {
-    const btn = qi('#btnDemo');
-    btn.disabled = true;
-    btn.textContent = '正在载入演示数据…';
-    setTimeout(() => go('app.html'), 420);
-  };
 })();
 </script>
 </body>

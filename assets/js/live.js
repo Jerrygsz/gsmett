@@ -117,6 +117,7 @@
           env: srv.project.env || S.project.env || null,
           report: srv.project.report || S.project.report || null,
           maintenance: srv.project.maintenance || S.project.maintenance || null,
+          accepted: srv.project.accepted || S.project.accepted || null,
         });
       }
       this.firstPaint = false;
@@ -205,7 +206,8 @@
         const S = TM.state;
         API.saveState(this.clientId, {
           org: S.org,
-          members: S.members,
+          // 成员不再整块回写：后台也能改，一旦这里推旧值就会把后台的修改覆盖掉。
+          // 客户端的成员增删改统一走 /members 接口。
           feedback: S.feedback || [],
           activity: S.activity,
           portalAsks: S.portalAsks,
@@ -215,6 +217,7 @@
             env: S.project.env || null,
             report: S.project.report || null,
             maintenance: S.project.maintenance || null,
+            accepted: S.project.accepted || null,
           },
         }).catch(() => { });
       }, 600);
@@ -319,6 +322,42 @@
 
     async ask(question, assistantId) {
       return API.chat(this.clientId, question, assistantId ? { assistantId } : {});
+    },
+
+    /* ---------------- 成员 ---------------- */
+
+    async refreshMembers() {
+      const r = await API.members(this.clientId);
+      TM.state.members = r.members || [];
+      return TM.state.members;
+    },
+
+    async addMember(m) {
+      const r = await API.addMember(this.clientId, m);
+      if (r.error) throw new Error(r.error);
+      await this.refreshMembers();
+      return r.member;
+    },
+
+    async editMember(mid, patch) {
+      const r = await API.editMember(this.clientId, mid, patch);
+      if (r.error) throw new Error(r.error);
+      await this.refreshMembers();
+      return r.member;
+    },
+
+    async removeMember(mid) {
+      const r = await API.removeMember(this.clientId, mid);
+      if (r.error) throw new Error(r.error);
+      await this.refreshMembers();
+    },
+
+    /* ---------------- 工单 ---------------- */
+
+    async newTicket(t) {
+      const r = await API.newTicket({ ...t, clientId: this.clientId });
+      if (r.error) throw new Error(r.error);
+      return r.ticket;
     },
   };
 

@@ -159,6 +159,94 @@ export function saveConfig(cfg) {
   return cfg;
 }
 
+/* ---------------- 平台人员 / 后台账号 / 工单 ----------------
+ * 这些数据是"服务商自己的"，不属于任何客户，单独存两份文件。
+ * 后台账号密码也加密落盘，且从不返回给浏览器。 */
+
+const PLATFORM_FILE = path.join(DATA_DIR, 'platform.json');
+const TICKETS_FILE = path.join(DATA_DIR, 'tickets.json');
+
+function defaultPlatform() {
+  return {
+    account: { email: 'admin@maozhiku.com', pwd: 'maozhiku2026', name: '管理员', role: '服务商管理员' },
+    staff: [],
+  };
+}
+
+function sealPlatform(p) {
+  if (!p?.account?.pwd) return p;
+  return { ...p, account: { ...p.account, pwd: seal(p.account.pwd, DATA_DIR) } };
+}
+
+function unsealPlatform(p) {
+  if (!p?.account?.pwd) return p;
+  const k = unseal(p.account.pwd, DATA_DIR);
+  return { ...p, account: { ...p.account, pwd: k === null ? '' : k } };
+}
+
+export function getPlatform() {
+  const raw = readJSON(PLATFORM_FILE, null);
+  if (!raw) {
+    const d = defaultPlatform();
+    writeJSON(PLATFORM_FILE, sealPlatform(d));
+    return d;
+  }
+  const p = unsealPlatform(raw);
+  return {
+    account: { ...defaultPlatform().account, ...(p.account || {}) },
+    staff: Array.isArray(p.staff) ? p.staff : [],
+  };
+}
+
+export function savePlatform(p) {
+  writeJSON(PLATFORM_FILE, sealPlatform(p));
+  return p;
+}
+
+export function getTickets() {
+  const t = readJSON(TICKETS_FILE, []);
+  return Array.isArray(t) ? t : [];
+}
+
+export function saveTickets(t) {
+  writeJSON(TICKETS_FILE, t);
+  return t;
+}
+
+/* ---------------- 客户成员 ----------------
+ * 以前成员是前端 TM.save() 整块覆盖 state，后台改不了、也容易被竞态覆盖。
+ * 现在统一走服务端，前端和后台共用同一份。 */
+
+export function listMembers(id) {
+  return getState(id)?.members || [];
+}
+
+export function addMember(id, member) {
+  const st = getState(id) || {};
+  st.members = Array.isArray(st.members) ? st.members : [];
+  st.members.push(member);
+  saveState(id, st);
+  return member;
+}
+
+export function updateMember(id, mid, patch) {
+  const st = getState(id) || {};
+  const i = (st.members || []).findIndex((m) => m.id === mid);
+  if (i < 0) return null;
+  st.members[i] = { ...st.members[i], ...patch, id: mid };
+  saveState(id, st);
+  return st.members[i];
+}
+
+export function removeMember(id, mid) {
+  const st = getState(id) || {};
+  const before = (st.members || []).length;
+  st.members = (st.members || []).filter((m) => m.id !== mid);
+  if (st.members.length === before) return false;
+  saveState(id, st);
+  return true;
+}
+
 export { readJSON, writeJSON };
 
 /**

@@ -22,6 +22,8 @@ import {
   ROOT, initStorage, listClients, getClient, saveClient, nextProjectNo, deleteClient,
   getState, saveState, patchState, getDocs, saveDocs, getIndex, saveIndex,
   uploadDir, clientDir, getConfig, saveConfig,
+  getPlatform, savePlatform, getTickets, saveTickets,
+  listMembers, addMember, updateMember, removeMember,
 } from './store.js';
 
 const PORT = Number(process.env.PORT || 8787);
@@ -347,6 +349,7 @@ function handleUpload(req, clientId) {
 async function route(req, res, url) {
   const p = url.pathname;
   const method = req.method;
+  let m;   // 路由正则捕获，平台段和客户段共用
 
   /* --- 基础 --- */
   if (p === '/api/health' && method === 'GET') {
@@ -364,6 +367,154 @@ async function route(req, res, url) {
 
   if (p === '/api/providers' && method === 'GET') {
     return sendJSON(res, 200, LLM.PROVIDERS);
+  }
+
+  /* --- 服务商后台：账号 / 团队人员 / 工单 ---
+   * 浏览器永远拿不到密码明文：登录在服务端比对，profile 只返回展示字段。 */
+  if (p === '/api/platform/profile' && method === 'GET') {
+    const plat = getPlatform();
+    return sendJSON(res, 200, {
+      account: { email: plat.account.email, name: plat.account.name, role: plat.account.role },
+      staffCount: plat.staff.length,
+    });
+  }
+
+  if (p === '/api/admin/login' && method === 'POST') {
+    const b = await readJSONBody(req);
+    const plat = getPlatform();
+    const ok = String(b.email || '').trim().toLowerCase() === String(plat.account.email).toLowerCase()
+      && String(b.pwd || '') === String(plat.account.pwd);
+    if (!ok) return sendJSON(res, 401, { ok: false, error: '账号或密码不对' });
+    return sendJSON(res, 200, {
+      ok: true,
+      account: { email: plat.account.email, name: plat.account.name, role: plat.account.role },
+    });
+  }
+
+  if (p === '/api/platform/profile' && (method === 'PATCH' || method === 'POST')) {
+    const b = await readJSONBody(req);
+    const plat = getPlatform();
+    const a = { ...plat.account };
+    if (b.name !== undefined) a.name = String(b.name).trim().slice(0, 30) || '管理员';
+    if (b.role !== undefined) a.role = String(b.role).trim().slice(0, 30) || '服务商管理员';
+    if (b.email !== undefined) {
+      const e = String(b.email).trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return sendJSON(res, 400, { error: '邮箱格式不对' });
+      a.email = e;
+    }
+    if (b.pwd !== undefined && String(b.pwd).trim()) {
+      const pw = String(b.pwd);
+      if (pw.length < 6) return sendJSON(res, 400, { error: '密码至少 6 位' });
+      a.pwd = pw;
+    }
+    plat.account = a;
+    savePlatform(plat);
+    return sendJSON(res, 200, { ok: true, account: { email: a.email, name: a.name, role: a.role } });
+  }
+
+  if (p === '/api/staff' && method === 'GET') {
+    return sendJSON(res, 200, { staff: getPlatform().staff });
+  }
+
+  if (p === '/api/staff' && method === 'POST') {
+    const b = await readJSONBody(req);
+    const name = String(b.name || '').trim();
+    if (!name) return sendJSON(res, 400, { error: '姓名必填' });
+    const plat = getPlatform();
+    if (plat.staff.some((s) => s.name === name)) {
+      return sendJSON(res, 400, { error: '已经有同名人员了' });
+    }
+    const s = {
+      id: 's_' + crypto.randomBytes(4).toString('hex'),
+      name,
+      role: String(b.role || '服务顾问').trim(),
+      title: String(b.title || '').trim(),
+      phone: String(b.phone || '').trim(),
+      email: String(b.email || '').trim(),
+      enabled: b.enabled !== false,
+      createdAt: new Date().toISOString(),
+    };
+    plat.staff.push(s);
+    savePlatform(plat);
+    return sendJSON(res, 200, { staff: s });
+  }
+
+  if ((m = p.match(/^\/api\/staff\/([\w]+)$/)) && (method === 'PATCH' || method === 'DELETE')) {
+    const plat = getPlatform();
+    const i = plat.staff.findIndex((s) => s.id === m[1]);
+    if (i < 0) return sendJSON(res, 404, { error: '人员不存在' });
+    if (method === 'DELETE') {
+      const removed = plat.staff.splice(i, 1)[0];
+      savePlatform(plat);
+      return sendJSON(res, 200, { ok: true, removed: removed.name });
+    }
+    const b = await readJSONBody(req);
+    const cur = plat.staff[i];
+    const next = {
+      ...cur,
+      name: b.name !== undefined ? String(b.name).trim() : cur.name,
+      role: b.role !== undefined ? String(b.role).trim() : cur.role,
+      title: b.title !== undefined ? String(b.title).trim() : cur.title,
+      phone: b.phone !== undefined ? String(b.phone).trim() : cur.phone,
+      email: b.email !== undefined ? String(b.email).trim() : cur.email,
+      enabled: b.enabled !== undefined ? !!b.enabled : cur.enabled,
+    };
+    if (!next.name) return sendJSON(res, 400, { error: '姓名不能为空' });
+    plat.staff[i] = next;
+    savePlatform(plat);
+    return sendJSON(res, 200, { staff: next });
+  }
+
+  if (p === '/api/tickets' && method === 'GET') {
+    return sendJSON(res, 200, { tickets: getTickets() });
+  }
+
+  if (p === '/api/tickets' && method === 'POST') {
+    const b = await readJSONBody(req);
+    const title = String(b.title || '').trim();
+    if (!title) return sendJSON(res, 400, { error: '请写一下遇到的问题' });
+    const c = b.clientId ? getClient(b.clientId) : null;
+    const t = {
+      id: 't_' + crypto.randomBytes(4).toString('hex'),
+      clientId: b.clientId || '',
+      org: c?.org || String(b.org || '未指定企业').trim(),
+      type: String(b.type || 'assist').trim(),
+      title,
+      detail: String(b.detail || '').trim(),
+      contact: String(b.contact || '').trim(),
+      status: 'open',
+      reply: '',
+      handler: '',
+      createdAt: new Date().toISOString(),
+      doneAt: '',
+    };
+    const all = getTickets();
+    all.unshift(t);
+    saveTickets(all);
+    return sendJSON(res, 200, { ticket: t });
+  }
+
+  if ((m = p.match(/^\/api\/tickets\/([\w]+)$/)) && (method === 'PATCH' || method === 'DELETE')) {
+    const all = getTickets();
+    const i = all.findIndex((t) => t.id === m[1]);
+    if (i < 0) return sendJSON(res, 404, { error: '工单不存在' });
+    if (method === 'DELETE') {
+      all.splice(i, 1);
+      saveTickets(all);
+      return sendJSON(res, 200, { ok: true });
+    }
+    const b = await readJSONBody(req);
+    const cur = all[i];
+    const status = b.status === 'done' ? 'done' : b.status === 'open' ? 'open' : cur.status;
+    all[i] = {
+      ...cur,
+      status,
+      reply: b.reply !== undefined ? String(b.reply).trim() : cur.reply,
+      handler: b.handler !== undefined ? String(b.handler).trim() : cur.handler,
+      doneAt: status === 'done' ? (cur.doneAt || new Date().toISOString()) : '',
+    };
+    saveTickets(all);
+    return sendJSON(res, 200, { ticket: all[i] });
   }
 
   /* --- 客户 --- */
@@ -409,7 +560,10 @@ async function route(req, res, url) {
       svc: b.svc || '企业 AI 知识库建设',
       stage: '待启动',
       pct: 0,
-      owner: b.owner || '周明',
+      owner: (b.owner || '').trim(),   // 不填就是「未指派」，不编个人名出来
+      amount: (b.amount || '').trim(),
+      due: (b.due || '').trim(),
+      note: (b.note || '').trim(),
       createdAt: new Date().toISOString().slice(0, 10),
     };
     saveClient(client);
@@ -418,11 +572,33 @@ async function route(req, res, url) {
     return sendJSON(res, 200, { client });
   }
 
-  let m;
-
   if ((m = p.match(/^\/api\/clients\/([\w]+)$/)) && method === 'GET') {
     const c = requireClient(m[1]);
     return sendJSON(res, 200, { client: c, state: ensureState(c.id) });
+  }
+
+  /* 编辑客户档案：后台「编辑客户」用，别让金额/负责人只能看不能改 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)$/)) && (method === 'PATCH' || method === 'POST')) {
+    const c = requireClient(m[1]);
+    const b = await readJSONBody(req);
+    const next = { ...c };
+    for (const k of ['org', 'contact', 'email', 'phone', 'industry', 'size', 'city', 'svc', 'owner', 'amount', 'due', 'note']) {
+      if (b[k] !== undefined) next[k] = String(b[k]).trim();
+    }
+    if (!next.org) return sendJSON(res, 400, { error: '企业名称不能为空' });
+    saveClient(next);
+    // 企业名/联系人也要同步到工作区，不然侧栏还显示旧名字
+    const st = getState(m[1]);
+    if (st?.org) {
+      st.org.name = next.org;
+      st.org.short = next.org.slice(0, 8);
+      st.org.contact = next.contact;
+      st.org.industry = next.industry;
+      st.org.city = next.city;
+      st.org.size = next.size;
+      saveState(m[1], st);
+    }
+    return sendJSON(res, 200, { client: next });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)$/)) && method === 'DELETE') {
@@ -440,6 +616,58 @@ async function route(req, res, url) {
     const patch = await readJSONBody(req);
     const st = patchState(m[1], patch);
     return sendJSON(res, 200, { state: st });
+  }
+
+  /* --- 客户成员：后台和客户端共用同一份，改完立刻落盘 --- */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/members$/)) && method === 'GET') {
+    requireClient(m[1]);
+    return sendJSON(res, 200, { members: listMembers(m[1]) });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/members$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const name = String(b.name || '').trim();
+    if (!name) return sendJSON(res, 400, { error: '姓名必填' });
+    const email = String(b.email || '').trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return sendJSON(res, 400, { error: '邮箱格式不对，或者留空' });
+    }
+    if (listMembers(id).some((x) => x.email && email && x.email.toLowerCase() === email.toLowerCase())) {
+      return sendJSON(res, 400, { error: '这个邮箱已经在成员列表里了' });
+    }
+    const member = {
+      id: 'm_' + crypto.randomBytes(4).toString('hex'),
+      name,
+      role: String(b.role || '销售员工').trim(),
+      email,
+      phone: String(b.phone || '').trim(),
+      status: b.status === 'limited' ? 'limited' : 'active',
+      at: new Date().toISOString().slice(0, 10),
+    };
+    addMember(id, member);
+    return sendJSON(res, 200, { member });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/members\/([\w]+)$/)) && (method === 'PATCH' || method === 'DELETE')) {
+    const id = m[1];
+    requireClient(id);
+    if (method === 'DELETE') {
+      const ok = removeMember(id, m[2]);
+      return sendJSON(res, ok ? 200 : 404, ok ? { ok: true } : { error: '成员不存在' });
+    }
+    const b = await readJSONBody(req);
+    const patch = {};
+    for (const k of ['name', 'role', 'email', 'phone', 'status']) {
+      if (b[k] !== undefined) patch[k] = String(b[k]).trim();
+    }
+    if (patch.name === '') return sendJSON(res, 400, { error: '姓名不能为空' });
+    if (patch.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patch.email)) {
+      return sendJSON(res, 400, { error: '邮箱格式不对，或者留空' });
+    }
+    const member = updateMember(id, m[2], patch);
+    return sendJSON(res, member ? 200 : 404, member ? { member } : { error: '成员不存在' });
   }
 
   /* --- 资料 --- */

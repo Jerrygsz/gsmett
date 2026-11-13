@@ -117,6 +117,21 @@
     runTests(id, limit, assistantId) { return this.post(`/api/clients/${id}/tests/run`, { limit, assistantId }, { timeout: 300000 }); },
     markTest(id, testId, verdict, note) { return this.post(`/api/clients/${id}/tests/mark`, { id: testId, verdict, note }); },
     report(id) { return this.get(`/api/clients/${id}/tests/report`); },
+
+    /* ---------- 成员（后台和客户端共用同一份） ---------- */
+    members(id) { return this.get(`/api/clients/${id}/members`); },
+    addMember(id, m) { return this.post(`/api/clients/${id}/members`, m); },
+    editMember(id, mid, patch) { return this.patch(`/api/clients/${id}/members/${mid}`, patch); },
+    removeMember(id, mid) { return this.del(`/api/clients/${id}/members/${mid}`); },
+
+    /* ---------- 工单（申请协助 / 预约诊断 / 开通申请） ---------- */
+    tickets() { return this.get('/api/tickets'); },
+    newTicket(t) { return this.post('/api/tickets', t); },
+
+    /* ---------- 服务商侧 ---------- */
+    profile() { return this.get('/api/platform/profile'); },
+    staff() { return this.get('/api/staff'); },
+    editClient(id, patch) { return this.patch(`/api/clients/${id}`, patch); },
   };
 
   window.API = API;

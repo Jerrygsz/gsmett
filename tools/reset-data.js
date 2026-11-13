@@ -1,8 +1,8 @@
 /**
  * 清空所有客户数据，回到刚装好的状态。
  *
- * 保留：data/config.json（平台模型 Key）
- * 清空：data/clients/ 下所有客户目录、data/clients.json 客户列表
+ * 保留：data/config.json（模型 Key）、data/platform.json（后台账号与服务商人员）
+ * 清空：data/clients/ 客户目录、data/clients.json 客户列表、data/tickets.json 工单
  * 备份：清空前自动打包到 backup/data-<时间戳>/
  *
  * 用法：
@@ -20,6 +20,8 @@ const CLIENTS = path.join(DATA, 'clients');
 const INDEX = path.join(DATA, 'clients.json');
 const CONFIG = path.join(DATA, 'config.json');
 const SALT = path.join(DATA, '.machine-salt');
+const PLATFORM = path.join(DATA, 'platform.json');
+const TICKETS = path.join(DATA, 'tickets.json');
 
 const noBackup = process.argv.includes('--no-backup');
 
@@ -65,6 +67,8 @@ if (!noBackup && fs.existsSync(CLIENTS)) {
   /* 盐必须跟配置一起备份。Key 是用「本机指纹 + 盐」加密的，
    * 只备份 config.json 不备份盐，恢复时解不开 Key，只能重填。 */
   if (fs.existsSync(SALT)) fs.copyFileSync(SALT, path.join(dir, '.machine-salt'));
+  if (fs.existsSync(PLATFORM)) fs.copyFileSync(PLATFORM, path.join(dir, 'platform.json'));
+  if (fs.existsSync(TICKETS)) fs.copyFileSync(TICKETS, path.join(dir, 'tickets.json'));
   console.log(`  已备份到：backup/${path.basename(dir)}`);
 }
 
@@ -72,8 +76,9 @@ if (!noBackup && fs.existsSync(CLIENTS)) {
 fs.rmSync(CLIENTS, { recursive: true, force: true });
 fs.mkdirSync(CLIENTS, { recursive: true });
 
-// 3. 重置客户列表，编号从 2000 重新开始
+// 3. 重置客户列表，编号从 2000 重新开始；工单跟着客户一起清掉
 fs.writeFileSync(INDEX, JSON.stringify({ seq: 2000, clients: [] }, null, 2), 'utf8');
+if (fs.existsSync(TICKETS)) fs.rmSync(TICKETS, { force: true });
 
 // 4. 确认模型 Key 还在
 let keyState = '未配置（第 5 步需要自己填）';
@@ -87,8 +92,10 @@ try {
 } catch { }
 
 console.log('');
-console.log('  ✅ 已清空所有客户与项目数据');
+console.log('  ✅ 已清空所有客户、项目数据与工单');
 console.log(`  模型 Key：${keyState}`);
+console.log('  保留：后台登录账号与服务商人员名单（data/platform.json）');
+console.log('  想连账号和人员一起重置，就手动删掉这个文件，重启服务会生成初始账号');
 console.log('');
 console.log('  下一步：打开 http://localhost:8787/admin.html 新建客户');
 console.log('  浏览器请按 Ctrl + Shift + R 强制刷新一次，避免加载旧缓存');

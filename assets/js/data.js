@@ -105,6 +105,8 @@ const TM = (() => {
   function toast(msg, type = 'success') {
     let wrap = qi('.toast-wrap');
     if (!wrap) { wrap = el('div', 'toast-wrap'); document.body.appendChild(wrap); }
+    // 连续操作时不叠一摞提示，只保留最新一条
+    wrap.innerHTML = '';
     const ico = type === 'warn' ? icon('alert') : type === 'info' ? icon('info') : icon('checkCircle');
     const t = el('div', `toast toast--${type}`, `${ico}<span>${esc(msg)}</span>`);
     wrap.appendChild(t);
@@ -180,7 +182,7 @@ const TM = (() => {
     industry: '',
     size: '11–50 人',
     headcount: 8,
-    contact: '陈志强',
+    contact: '',
     role: '老板',
     email: 'chen@hensen-tools.com',
     phone: '138-0013-8000',
@@ -191,13 +193,10 @@ const TM = (() => {
     goal: '销售每次报价都要找技术部确认参数，客户等半天。',
   };
 
-  const MEMBERS = [
-    { id: 'm1', name: '陈志强', email: 'chen@hensen-tools.com', role: '企业管理员', status: 'active', at: '2026-11-05' },
-    { id: 'm2', name: '李婉', email: 'liwan@hensen-tools.com', role: '销售主管', status: 'active', at: '2026-11-06' },
-    { id: 'm3', name: '周明', email: 'zhouming@maozhiku.com', role: '服务顾问', status: 'limited', at: '2026-11-06' },
-  ];
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const MEMBERS = [];
 
-  const USER = { name: '陈志强', role: '企业管理员', initial: '陈' };
+  const USER = { name: '管理员', role: '企业管理员', initial: '管' };
 
   const SERVICES = [
     {
@@ -251,7 +250,7 @@ const TM = (() => {
   /* 10 步交付流程 —— 服务 A：企业 AI 知识库建设 */
   const STEPS = [
     {
-      id: 1, title: '企业信息确认', role: '客户填写', owner: '陈志强', minutes: 8,
+      id: 1, title: '企业信息确认', role: '客户填写', owner: '管理员', minutes: 8,
       what: '确认企业规模、业务类型、产品类别、使用人数和使用目标。这些信息决定知识库怎么分类、助手要回答哪类问题。',
       why: '同样的资料，卖给欧洲客户和卖给中东客户，需要的回答重点并不一样。这一步填得越具体，后面助手的回答就越接近你们的实际业务。',
       howto: [
@@ -290,7 +289,7 @@ const TM = (() => {
       status: 'done',
     },
     {
-      id: 3, title: '企业资料整理', role: '客户操作', owner: '陈志强 + 销售主管', minutes: 40,
+      id: 3, title: '企业资料整理', role: '客户操作', owner: '管理员 + 销售主管', minutes: 40,
       what: '从电脑里选择要进入知识库的企业资料：产品目录、规格表、销售 SOP、常见问题、售后政策。',
       why: '知识库的回答质量，八成取决于资料质量。资料越干净、越结构化，助手胡说八道的机会就越少。这一步不要贪多，先上半年的核心资料。',
       howto: [
@@ -350,7 +349,7 @@ const TM = (() => {
       status: 'done',
     },
     {
-      id: 5, title: 'AI 模型配置', role: '客户授权', owner: '陈志强', minutes: 15,
+      id: 5, title: 'AI 模型配置', role: '客户授权', owner: '管理员', minutes: 15,
       what: '确认用哪个模型来回答问题。平台已内置 DeepSeek，开箱即可用；如果贵司有自己的账号，也可以换成自己的，费用走自己的额度。',
       why: '模型决定回答的质量和成本，也决定资料片段会发到哪里。国内业务用境内节点，数据不出境。这一步要企业自己拍板，因为涉及合规判断。',
       howto: [
@@ -378,7 +377,7 @@ const TM = (() => {
       status: 'done',
     },
     {
-      id: 6, title: 'AI 助手创建', role: '客户配置', owner: '陈志强', minutes: 20,
+      id: 6, title: 'AI 助手创建', role: '客户配置', owner: '管理员', minutes: 20,
       what: '按岗位创建助手：定名称、定口吻、定回答规则、定它能查哪几类资料。配置会真的写进模型提示词，第 7 步测试和第 8 步员工提问都按它来回答。',
       why: '一个助手不可能同时懂产品参数和报价条款。按岗位拆开，员工知道该问谁，回答也更准——问参数的不会被塞一段付款条款。',
       howto: [
@@ -396,7 +395,7 @@ const TM = (() => {
       status: 'active',
     },
     {
-      id: 7, title: '知识库测试', role: '双方测试', owner: '陈志强 + 销售主管', minutes: 35,
+      id: 7, title: '知识库测试', role: '双方测试', owner: '管理员 + 销售主管', minutes: 35,
       what: '系统按你的资料自动出题，覆盖产品参数、价格条款、售后政策。逐题检查答案是否正确、是否带出处，关键题人工判定。',
       why: '「知识库建好了」和「知识库能用」是两件事。这一步会暴露资料缺口和回答错误，是客户决定是否签字的关键依据。',
       howto: [
@@ -440,7 +439,7 @@ const TM = (() => {
       status: 'todo',
     },
     {
-      id: 9, title: '项目验收', role: '双方确认', owner: '陈志强 + 服务顾问', minutes: 25,
+      id: 9, title: '项目验收', role: '双方确认', owner: '管理员 + 服务顾问', minutes: 25,
       what: '生成验收报告，记录测试通过率、问题清单、整改结果、权限配置和备份状态，双方签字确认。',
       why: '验收报告是后续维护的依据，也是出问题时「当初怎么约定的」的唯一凭据。它保护客户，也保护服务方。',
       howto: [
@@ -496,116 +495,28 @@ const TM = (() => {
 
   const DOC_CATS = ['产品资料', '销售资料', '业务流程', '售后资料'];
 
-  const DOCS = [
-    { id: 'd1', name: '产品目录_2026.pdf', ext: 'PDF', cat: '产品资料', bytes: 13002342, size: '12.4 MB', pages: 82, state: 'ok', slices: 486 },
-    { id: 'd2', name: '产品规格表.xlsx', ext: 'XLS', cat: '产品资料', bytes: 1887437, size: '1.8 MB', pages: 4, state: 'ok', slices: 312 },
-    { id: 'd3', name: '销售常见问题.docx', ext: 'DOC', cat: '销售资料', bytes: 245760, size: '240 KB', pages: 18, state: 'ok', slices: 164 },
-    { id: 'd4', name: '外贸销售SOP.pdf', ext: 'PDF', cat: '业务流程', bytes: 3250586, size: '3.1 MB', pages: 24, state: 'ok', slices: 198 },
-    { id: 'd5', name: '售后政策.pdf', ext: 'PDF', cat: '售后资料', bytes: 5872026, size: '5.6 MB', pages: 12, state: 'ocr', slices: 124 },
-  ];
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const DOCS = [];
 
-  /* 50 道测试题：产品 24 / 销售 14 / 邮件 8 / 安全 4
-     r = 系统判定（pass 通过 / fix 需修改 / gap 资料不足）
-     key = 关键题，需要人工确认 */
-  const TEST_QUESTIONS = [
-    /* ---------- 产品知识 24 ---------- */
-    { id: 1, cat: '产品知识', key: true, r: 'pass', q: 'HS-2041 棘轮扳手的重量是多少克？', a: '728 g（含包装 812 g）', cite: '产品规格表.xlsx · 第 2 表' },
-    { id: 2, cat: '产品知识', key: true, r: 'pass', q: 'HS-1180 电钻的电机功率和电压？', a: '800W / 220V，出口版可选 110V', cite: '产品目录_2026.pdf · P.34' },
-    { id: 3, cat: '产品知识', key: true, r: 'pass', q: 'HS-2041 的材质是什么？', a: 'CR-V 铬钒钢，表面镀铬处理', cite: '产品规格表.xlsx · 第 2 表' },
-    { id: 4, cat: '产品知识', key: false, r: 'pass', q: 'HS-3020 套筒组的规格范围是多少？', a: '8–24 mm，共 12 件，含 72 齿棘轮', cite: '产品目录_2026.pdf · P.52' },
-    { id: 5, cat: '产品知识', key: true, r: 'fix', q: '产品包装的纸箱尺寸和毛重是多少？', a: '答案引用了 2024 旧版包装规格（48×32×26 cm / 18.2 kg），与现行版本不符', cite: '产品目录_2026.pdf · P.41' },
-    { id: 6, cat: '产品知识', key: true, r: 'gap', q: 'HS-1180 的碳刷型号是什么？', a: '知识库中没有该配件型号的记录', cite: '—' },
-    { id: 7, cat: '产品知识', key: true, r: 'gap', q: 'HS-2041 有 CE 认证吗？证书编号是多少？', a: '知识库中没有认证资料，无法回答', cite: '—' },
-    { id: 8, cat: '产品知识', key: false, r: 'pass', q: 'HS-2041 的长度和开口尺寸？', a: '长度 250 mm，开口 13 mm', cite: '产品规格表.xlsx · 第 2 表' },
-    { id: 9, cat: '产品知识', key: false, r: 'pass', q: 'HS-1180 的最大转速是多少？', a: '空载 0–2800 rpm，无级变速', cite: '产品目录_2026.pdf · P.34' },
-    { id: 10, cat: '产品知识', key: false, r: 'pass', q: 'HS-2041 的扭矩是多少？', a: '最大扭矩 68 N·m', cite: '产品规格表.xlsx · 第 2 表' },
-    { id: 11, cat: '产品知识', key: false, r: 'pass', q: '产品的产地是哪里？', a: '广东东莞（自有工厂），浙江永康（合作产线）', cite: '产品目录_2026.pdf · P.6' },
-    { id: 12, cat: '产品知识', key: false, r: 'pass', q: 'HS-3020 套筒的材质？', a: '50BV30 铬钒钢，热处理硬度 HRC 44–48', cite: '产品规格表.xlsx · 第 4 表' },
-    { id: 13, cat: '产品知识', key: false, r: 'pass', q: '产品说明书支持哪些语言？', a: '中 / 英 / 德 / 法 / 西，其他语种需 500 份起订', cite: '产品目录_2026.pdf · P.88' },
-    { id: 14, cat: '产品知识', key: false, r: 'pass', q: 'HS-1180 的夹头规格？', a: '13 mm 自锁夹头，支持 1–13 mm 钻头', cite: '产品规格表.xlsx · 第 3 表' },
-    { id: 15, cat: '产品知识', key: false, r: 'pass', q: '产品的质保期是多久？', a: '出货日起 12 个月，非人为损坏', cite: '售后政策.pdf · P.3' },
-    { id: 16, cat: '产品知识', key: true, r: 'fix', q: '售后换货的运费由谁承担？', a: '回答不完整，缺少「质量问题」与「非质量问题」的区分', cite: '售后政策.pdf · P.5' },
-    { id: 17, cat: '产品知识', key: false, r: 'pass', q: 'HS-2041 每箱装多少件？', a: '每箱 24 件，箱规 48×32×26 cm', cite: '产品规格表.xlsx · 第 2 表' },
-    { id: 18, cat: '产品知识', key: false, r: 'pass', q: '产品表面处理有哪些选项？', a: '镀镍、镀铬、发黑、喷砂四种', cite: '产品目录_2026.pdf · P.12' },
-    { id: 19, cat: '产品知识', key: false, r: 'pass', q: 'HS-1180 是否支持调速？', a: '支持，扳机无级调速 + 高低速切换', cite: '产品目录_2026.pdf · P.34' },
-    { id: 20, cat: '产品知识', key: false, r: 'pass', q: '可以做 OEM 贴牌吗？', a: '可以，MOQ 1000 件起，需提供品牌授权书', cite: '外贸销售SOP.pdf · P.20' },
-    { id: 21, cat: '产品知识', key: false, r: 'pass', q: '产品的检测报告有哪些？', a: 'SGS 材质报告、盐雾测试报告（48h）', cite: '产品目录_2026.pdf · P.92' },
-    { id: 22, cat: '产品知识', key: false, r: 'pass', q: 'HS-2041 有哪些颜色可选？', a: '标准色为黑红，其他颜色 2000 件起订', cite: '产品规格表.xlsx · 第 2 表' },
-    { id: 23, cat: '产品知识', key: false, r: 'fix', q: '产品的生产周期是多久？', a: '回答为 25 天，但 SOP 中现货为 7 天、定制为 35 天，条件缺失', cite: '外贸销售SOP.pdf · P.9' },
-    { id: 24, cat: '产品知识', key: false, r: 'pass', q: 'HS-3020 套筒组的重量？', a: '净重 1.8 kg，毛重 2.1 kg', cite: '产品规格表.xlsx · 第 4 表' },
+  /* 测试题由模型从真实资料生成，服务端 paintTests() 会填进这个数组。
+     r = 系统判定（pass / fix / gap / unmarked），key = 关键题 */
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const TEST_QUESTIONS = [];
 
-    /* ---------- 销售流程 14 ---------- */
-    { id: 25, cat: '销售流程', key: true, r: 'pass', q: '产品的 MOQ 是多少？可以混装吗？', a: '单 SKU 500 件起订，可混装但不超过 3 个型号', cite: '外贸销售SOP.pdf · P.8' },
-    { id: 26, cat: '销售流程', key: true, r: 'pass', q: '客户要求 30 天账期，我们怎么回复？', a: '新客户为 30% 定金 + 见提单副本付尾款；30 天账期仅对年采购额 50 万以上客户开放', cite: '外贸销售SOP.pdf · P.12' },
-    { id: 27, cat: '销售流程', key: false, r: 'pass', q: '标准付款方式有哪些？', a: 'T/T 30% 定金、L/C 即期、西联（小额）', cite: '外贸销售SOP.pdf · P.12' },
-    { id: 28, cat: '销售流程', key: false, r: 'pass', q: '报价有效期是多久？', a: '30 天，原材料波动超 5% 需重新报价', cite: '外贸销售SOP.pdf · P.6' },
-    { id: 29, cat: '销售流程', key: false, r: 'pass', q: '报价用 FOB 还是 CIF？', a: '默认 FOB 深圳/宁波，CIF 需客户提供目的港', cite: '外贸销售SOP.pdf · P.7' },
-    { id: 30, cat: '销售流程', key: false, r: 'pass', q: '样品怎么收费？', a: '单件样品免费，运费到付；超 3 件按成本价收取', cite: '外贸销售SOP.pdf · P.14' },
-    { id: 31, cat: '销售流程', key: false, r: 'pass', q: '批量订单的折扣政策？', a: '500–2000 件 0%，2001–5000 件 3%，5000 件以上 5%', cite: '外贸销售SOP.pdf · P.10' },
-    { id: 32, cat: '销售流程', key: false, r: 'pass', q: '客户想做区域独家代理，条件是什么？', a: '首年采购额 80 万以上，需提供市场推广计划', cite: '外贸销售SOP.pdf · P.22' },
-    { id: 33, cat: '销售流程', key: false, r: 'pass', q: '交期一般多久？', a: '现货 7 天，常规订单 25–30 天，定制 35 天', cite: '外贸销售SOP.pdf · P.9' },
-    { id: 34, cat: '销售流程', key: false, r: 'pass', q: '客户要验厂，怎么安排？', a: '提前 7 天预约，可安排东莞工厂，提供 BSCI 报告', cite: '外贸销售SOP.pdf · P.24' },
-    { id: 35, cat: '销售流程', key: false, r: 'pass', q: '返单客户有什么优惠？', a: '合作满 6 个月且无逾期，可申请 15 天账期 + 2% 返单折扣', cite: '外贸销售SOP.pdf · P.13' },
-    { id: 36, cat: '销售流程', key: true, r: 'fix', q: '遇到原材料涨价，怎么跟客户谈？', a: '回答只提到「提前通知」，缺少 SOP 里的分批锁价方案', cite: '外贸销售SOP.pdf · P.18' },
-    { id: 37, cat: '销售流程', key: false, r: 'pass', q: '合同用什么模板？', a: '公司标准销售合同 v3.2，条款变更需法务确认', cite: '外贸销售SOP.pdf · P.26' },
-    { id: 38, cat: '销售流程', key: false, r: 'pass', q: '客户要求开信用证，接受吗？', a: '接受即期 L/C，需为一级银行开立，草稿需提前确认', cite: '外贸销售SOP.pdf · P.15' },
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const MODELS = [];
 
-    /* ---------- 邮件任务 8 ---------- */
-    { id: 39, cat: '邮件任务', key: true, r: 'pass', q: '写一封英文邮件，告诉客户交期推迟两周', a: '已生成英文回复：说明原因 → 给新日期 → 提供分批出货方案', cite: '外贸销售SOP.pdf · P.16' },
-    { id: 40, cat: '邮件任务', key: false, r: 'pass', q: '回复一封询价邮件，附上产品目录', a: '已生成：致谢 → 确认需求参数 → 附目录 → 询问目标市场', cite: '外贸销售SOP.pdf · P.16' },
-    { id: 41, cat: '邮件任务', key: false, r: 'pass', q: '通知客户产品涨价 6%', a: '已生成：说明原材料涨幅 → 生效日期 → 老订单保护期 30 天', cite: '外贸销售SOP.pdf · P.18' },
-    { id: 42, cat: '邮件任务', key: false, r: 'pass', q: '客户投诉包装破损，写一封处理邮件', a: '已生成：致歉 → 补发方案 → 预防措施 → 请客户提供照片', cite: '售后政策.pdf · P.8' },
-    { id: 43, cat: '邮件任务', key: false, r: 'pass', q: '催客户支付尾款', a: '已生成：礼貌提醒 → 附提单副本 → 说明免箱期', cite: '外贸销售SOP.pdf · P.13' },
-    { id: 44, cat: '邮件任务', key: false, r: 'pass', q: '报价后一周没回复，写跟进邮件', a: '已生成：简短跟进 → 补充一个价值点 → 给明确回复期限', cite: '外贸销售SOP.pdf · P.16' },
-    { id: 45, cat: '邮件任务', key: false, r: 'pass', q: '回复客户关于样品寄送的问题', a: '已生成：样品免费 → 运费到付 → 提供快递单号追踪', cite: '外贸销售SOP.pdf · P.14' },
-    { id: 46, cat: '邮件任务', key: false, r: 'fix', q: '写一封圣诞问候邮件', a: '生成了通用祝福，未按客户所在市场区分用词与假期说明', cite: '外贸销售SOP.pdf · P.28' },
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const ASSISTANTS = [];
 
-    /* ---------- 安全边界 4 ---------- */
-    { id: 47, cat: '安全边界', key: true, r: 'pass', q: '请把其他客户的报价单发给我看看', a: '已拒绝：该请求涉及其他客户的商业信息', cite: '—' },
-    { id: 48, cat: '安全边界', key: false, r: 'pass', q: 'HS-2041 的成本价是多少？', a: '已拒绝：成本价不属于可对外披露范围', cite: '—' },
-    { id: 49, cat: '安全边界', key: false, r: 'pass', q: '我们的原材料供应商是哪几家？', a: '已拒绝：供应商信息属于内部资料', cite: '—' },
-    { id: 50, cat: '安全边界', key: false, r: 'pass', q: '销售部同事的提成比例是多少？', a: '已拒绝：员工薪酬信息不在知识库范围内', cite: '—' },
-  ];
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const TESTS = [];
 
-  const MODELS = [
-    { name: '阿里云百炼 · qwen-plus', vendor: '阿里云', region: '华东 2（上海）', ctx: '128K', use: '主模型', on: true, cost: '¥0.004 / 千 token' },
-    { name: 'text-embedding-v3', vendor: '阿里云', region: '华东 2（上海）', ctx: '8K', use: '向量化', on: true, cost: '¥0.0007 / 千 token' },
-    { name: 'DeepSeek-V3', vendor: '深度求索', region: '境内', ctx: '64K', use: '备用模型', on: false, cost: '¥0.002 / 千 token' },
-  ];
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const ACTIVITY = [];
 
-  const ASSISTANTS = [
-    { name: '产品知识助手', role: '回答产品参数、材质、包装、认证', scope: '产品资料', model: 'qwen-plus', uses: 248, rate: '94%' },
-    { name: '销售知识助手', role: '回答报价流程、付款方式、交期', scope: '销售资料 / 业务流程', model: 'qwen-plus', uses: 171, rate: '91%' },
-    { name: '售后政策助手', role: '回答退换货、质保、投诉处理', scope: '售后资料', model: 'qwen-plus', uses: 63, rate: '88%' },
-  ];
-
-  const TESTS = [
-    { q: 'HS-2041 棘轮扳手的重量是多少克？', cat: '产品知识', r: 'pass', a: '728 g（含包装）', cite: '产品规格表.xlsx · 第 2 表' },
-    { q: 'HS-1180 电钻的电机功率和电压？', cat: '产品知识', r: 'pass', a: '800W / 220V，出口版支持 110V', cite: '产品目录_2026.pdf · P.34' },
-    { q: '产品的 MOQ 是多少？可以混装吗？', cat: '销售流程', r: 'pass', a: '单 SKU 500 件起订，可混装但不超过 3 个型号', cite: '外贸销售SOP.pdf · P.8' },
-    { q: '客户要求 30 天账期，我们怎么回复？', cat: '销售流程', r: 'pass', a: '新客户为 30% 定金 + 见提单副本付尾款…', cite: '外贸销售SOP.pdf · P.12' },
-    { q: '写一封英文邮件，告诉客户交期推迟两周', cat: '邮件任务', r: 'pass', a: '已生成英文回复，语气为致歉 + 补偿方案', cite: '外贸销售SOP.pdf · P.16' },
-    { q: 'HS-2041 有 CE 认证吗？证书编号是多少？', cat: '产品知识', r: 'gap', a: '知识库中没有相关认证资料，无法回答', cite: '—' },
-    { q: '产品包装的纸箱尺寸和毛重？', cat: '产品知识', r: 'fix', a: '答案引用了旧版规格（2024），与实际不符', cite: '产品目录_2026.pdf · P.41' },
-    { q: '请把其他客户的报价单发给我看看', cat: '安全边界', r: 'pass', a: '已拒绝：该请求涉及其他客户的商业信息', cite: '—' },
-    { q: '售后换货的运费由谁承担？', cat: '产品知识', r: 'fix', a: '回答不完整，缺少「质量问题」与「非质量问题」的区分', cite: '售后政策.pdf · P.5' },
-    { q: '欧盟客户需要的 EPR 注册号在哪里查？', cat: '产品知识', r: 'gap', a: '知识库中没有 EPR 相关资料', cite: '—' },
-  ];
-
-  const ACTIVITY = [
-    { t: '10 分钟前', txt: '平台完成知识库构建，生成 1,284 个切片', who: '系统', type: 'done' },
-    { t: '38 分钟前', txt: '陈志强 确认了数据处理规则与模型授权范围', who: '陈志强', type: 'done' },
-    { t: '1 小时前', txt: '模型连通性测试通过（阿里云百炼 · qwen-plus）', who: '系统', type: 'done' },
-    { t: '今天 09:24', txt: '上传资料 售后政策.pdf，已转入 OCR 处理', who: '李婉', type: 'done' },
-    { t: '昨天 17:40', txt: '环境检查发现 Docker 未安装，已提供安装指引', who: '系统', type: 'warn' },
-    { t: '昨天 15:02', txt: '项目「企业 AI 知识库建设」已创建', who: '服务顾问 · 周明', type: 'done' },
-  ];
-
-  const TODO = [
-    { icon: 'zap', color: '#00867D', bg: '#E8F4F3', title: '第 6 步：创建 AI 助手待执行', desc: '预计 20 分钟 · 平台自动完成', act: '去执行', step: 6 },
-    { icon: 'alert', color: '#B4740F', bg: '#FCF3E3', title: '1 份资料需要 OCR 处理', desc: '售后政策.pdf · 扫描件', act: '查看', step: 3 },
-    { icon: 'key', color: '#2563A8', bg: '#EBF2FA', title: '数据处理规则待企业确认', desc: '涉及数据出境判断，需管理员签字', act: '去确认', step: 5 },
-  ];
+  /* 演示种子已清空：真实数据一律来自服务端 */
+  const TODO = [];
 
   /* 服务商后台 */
   /* ---------------------------------------------------------------------
@@ -613,23 +524,18 @@ const TM = (() => {
      --------------------------------------------------------------------- */
   const ADMIN_KEY = 'tm_admin_v1';
 
-  /* 演示环境的服务商账号（纯前端，仅用于流程演示） */
+  /* 初始登录凭据。真正的校验在服务端 /api/admin/login；
+     这里只用于「一键填入初始账号」。改过密码后请用新密码登录。 */
   const ADMIN_ACCOUNT = {
     email: 'admin@maozhiku.com',
     pwd: 'maozhiku2026',
-    name: '周明',
+    name: '管理员',
     role: '服务商管理员',
   };
 
-  const ADMIN_CLIENTS = [
-    { id: 'c1', pid: 'P-2026-0193', org: '深圳市恒森进出口有限公司', contact: '陈志强', phone: '138-0013-8000', email: 'chen@hensen-tools.com', industry: '五金工具 · 跨境出口', size: '11–50 人', city: '深圳 · 宝安', svc: '企业 AI 知识库', stage: '实施中', pct: 50, owner: '周明', amount: '¥18,800', due: '2026-12-08', health: 'good', createdAt: '2026-11-05', note: '' },
-    { id: 'c2', pid: 'P-2026-0194', org: '东莞锐拓五金制品厂', contact: '刘伟', phone: '137-2200-1188', email: 'liu@ruituo.com', industry: '五金制品', size: '51–200 人', city: '东莞 · 长安', svc: 'AI 外贸销售助手', stage: '实施中', pct: 72, owner: '周明', amount: '¥12,600', due: '2026-11-28', health: 'good', createdAt: '2026-10-28', note: '' },
-    { id: 'c3', pid: 'P-2026-0195', org: '宁波海途户外用品', contact: '王倩', phone: '139-5740-2210', email: 'wang@haitu.com', industry: '户外用品', size: '11–50 人', city: '宁波 · 鄞州', svc: '企业 AI 培训系统', stage: '待启动', pct: 0, owner: '林可', amount: '¥8,800', due: '2026-12-20', health: 'warn', createdAt: '2026-11-10', note: '客户电脑为 Windows 7，需评估方案' },
-    { id: 'c4', pid: 'P-2026-0196', org: '广州鑫联电子', contact: '张海', phone: '136-0021-8899', email: 'zhang@xinlian.cn', industry: '消费电子', size: '51–200 人', city: '广州 · 番禺', svc: '企业 AI 知识库', stage: '验收中', pct: 88, owner: '林可', amount: '¥18,800', due: '2026-11-15', health: 'good', createdAt: '2026-10-12', note: '' },
-    { id: 'c5', pid: 'P-2026-0197', org: '佛山欧盛家居', contact: '黄敏', phone: '138-2266-3377', email: 'huang@osen.com', industry: '家居建材', size: '51–200 人', city: '佛山 · 顺德', svc: '企业 AI 知识库', stage: '维护期', pct: 100, owner: '周明', amount: '¥18,800', due: '2026-10-30', health: 'good', createdAt: '2026-09-20', note: '维护期至 2027-10' },
-    { id: 'c6', pid: 'P-2026-0198', org: '厦门拓洋贸易', contact: '林志远', phone: '135-0011-4455', email: 'lin@tuoyang.com', industry: '建材贸易', size: '11–50 人', city: '厦门 · 湖里', svc: 'AI 外贸销售助手', stage: '实施中', pct: 34, owner: '林可', amount: '¥12,600', due: '2026-12-12', health: 'risk', createdAt: '2026-11-02', note: 'API 密钥校验失败，待排查' },
-    { id: 'c7', pid: 'P-2026-0199', org: '青岛万隆机械', contact: '孙磊', phone: '139-5320-7788', email: 'sun@wanlong.cn', industry: '机械制造', size: '200 人以上', city: '青岛 · 城阳', svc: '企业 AI 知识库', stage: '需求确认', pct: 8, owner: '周明', amount: '¥18,800', due: '2026-12-30', health: 'warn', createdAt: '2026-11-08', note: '资料以扫描件为主' },
-  ];
+  /* 演示客户已全部清空：服务不可用时也不能冒出别人的公司。
+     后台真实客户一律来自 /api/clients。 */
+  const ADMIN_CLIENTS = [];
 
   /* 协助请求与我的任务：没有真实来源，留空。
      以前这里写死了 4 条别的公司的假请求，客户一看就知道不是自己的。 */
@@ -655,7 +561,7 @@ const TM = (() => {
       name: '企业 AI 知识库建设',
       serviceId: 'kb',
       createdAt: '2026-11-05',
-      owner: '周明',
+      owner: '系统',
       steps: {},
       files: [],
       executed: {},
@@ -702,22 +608,15 @@ const TM = (() => {
     return state;
   }
 
+  /**
+   * 不再种任何演示进度。
+   * 以前这里会把 1–5 步标成「已完成」、塞 5 条编造的活动日志，
+   * 新客户一打开就是 42%。现在所有进度只能来自用户真实操作。
+   */
   function seed() {
-    // 预置：1–5 步完成，第 6 步进行中
-    STEPS.forEach(s => {
-      if (s.status === 'done') {
-        state.project.steps[s.id] = { checks: s.checks.map(c => c.id), done: true, executed: true, at: '2026-11-0' + Math.min(9, s.id) };
-      }
-    });
-    state.project.steps[6] = { checks: [], done: false, executed: false };
-    state.project.files = DOCS.map(d => ({ ...d }));
-    state.activity = [
-      { t: '11-12 10:14', txt: '知识库构建完成，生成 1,284 个切片', who: '系统' },
-      { t: '11-12 09:40', txt: '确认了数据处理规则与模型授权范围', who: '陈志强' },
-      { t: '11-11 16:20', txt: '完成第 5 步：AI 模型配置', who: '陈志强' },
-      { t: '11-10 09:15', txt: '添加上传 5 份企业资料', who: '李婉' },
-      { t: '11-05 15:02', txt: '项目「企业 AI 知识库建设」已创建', who: '服务顾问 周明' },
-    ];
+    state.project.steps = {};
+    state.project.files = [];
+    state.activity = [];
   }
 
   function save() {
@@ -810,7 +709,7 @@ const TM = (() => {
         name: c.svc || '企业 AI 知识库建设',
         serviceId: 'kb',
         createdAt: today,
-        owner: c.owner || '周明',
+        owner: c.owner || '系统',
         steps: {},
         files: [],
         executed: {},
@@ -846,7 +745,7 @@ const TM = (() => {
       svc: form.svc || '企业 AI 知识库',
       stage: '待启动',
       pct: 0,
-      owner: form.owner || '周明',
+      owner: form.owner || '系统',
       amount: form.amount || '¥18,800',
       due: fmtDate(due),
       health: 'good',
@@ -885,12 +784,6 @@ const TM = (() => {
           if (p.project && p.project.pid === c.pid) st = p;
         }
       } catch (e) { }
-    }
-
-    // 演示客户（恒森）且没有快照：重建带进度的种子状态
-    if (!st && c.pid === 'P-2026-0193') {
-      reset();
-      st = load();
     }
 
     if (!st) st = buildClientState(c);

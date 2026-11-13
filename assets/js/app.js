@@ -121,7 +121,7 @@
     }
 
     if (cur.id >= 7 && !(S.project.testRun && S.project.testRun.generated)) {
-      out.push({ icon: 'target', color: 'var(--info)', bg: 'var(--info-bg)', title: '测试题还没有生成', desc: '50 道题，覆盖产品 / 销售 / 邮件 / 安全', act: '去生成', step: 7 });
+      out.push({ icon: 'target', color: 'var(--info)', bg: 'var(--info-bg)', title: '测试题还没有生成', desc: '会由模型从你上传的资料里出题，不是预置题库', act: '去生成', step: 7 });
     }
 
     if (S.project.report && (S.project.report.fix + S.project.report.gap) > 0) {
@@ -290,7 +290,8 @@
     qa('[data-svc]').forEach(n => n.onclick = () => {
       const id = n.dataset.svc;
       if (id === 'kb') go('wizard', String(TM.currentStep().id));
-      else if (id === 'admin') toast('企业 AI 管理随项目交付后自动开通', 'info');
+      // 以前这里只弹一句「交付后自动开通」，点了个寂寞。现在直接进配置中心
+      else if (id === 'admin') { location.hash = '#config'; toast('模型、助手、资料范围都在这里配置'); }
       else buyService(id);
     });
   }
@@ -391,12 +392,18 @@
     qa('[data-buy]').forEach(b => b.onclick = () => buyService(b.dataset.buy));
     qi('#btnConsult').onclick = () => modal({
       title: '预约服务诊断',
-      desc: '服务顾问会在 1 个工作日内联系你。',
-      body: `<div class="field"><label class="field__label">联系人</label><input class="input" value="${esc(S.org.contact)}"></div>
-             <div class="field"><label class="field__label">联系电话 / 微信</label><input class="input" placeholder="方便联系的时间也可以写在备注里"></div>
-             <div class="field"><label class="field__label">最想解决的问题</label><textarea class="textarea" placeholder="例如：产品资料太散，销售每次报价都要问技术部"></textarea></div>`,
+      desc: '提交后生成真实工单，服务商后台能看到并安排联系。',
+      body: `<div class="field"><label class="field__label">联系人</label><input class="input" id="csName" value="${esc(S.org.contact)}"></div>
+             <div class="field"><label class="field__label">联系电话 / 微信</label><input class="input" id="csPhone" placeholder="方便联系的时间也可以写在备注里"></div>
+             <div class="field"><label class="field__label">最想解决的问题 <i class="req">*</i></label><textarea class="textarea" id="csNeed" placeholder="例如：产品资料太散，销售每次报价都要问技术部"></textarea></div>`,
       okText: '提交预约',
-      onOk: () => toast('已提交，服务顾问会尽快联系你'),
+      onOk: async (back) => {
+        const need = back.querySelector('#csNeed').value.trim();
+        if (!need) { toast('写一下最想解决的问题', 'warn'); return false; }
+        const name = back.querySelector('#csName').value.trim();
+        const phone = back.querySelector('#csPhone').value.trim();
+        return (await submitTicket('consult', `预约服务诊断 · ${need.slice(0, 30)}`, need, `${name} ${phone}`.trim())) ? undefined : false;
+      },
     });
   }
 
@@ -409,11 +416,15 @@
       body: `
         <div class="note note--brand mb16">${icon('info')}<span>${s.id === 'sales' ? '销售助手需要先有可用的知识库作为检索基础。你当前的知识库项目进行到第 ' + TM.currentStep().id + ' 步，建议交付后再开通，否则效果会打折。' : '培训系统需要先有稳定的助手。建议在知识库交付、助手运行 1 个月后开通。'}</span></div>
         <div class="field"><label class="field__label">计划开始时间</label>
-          <select class="select"><option>知识库项目交付后（推荐）</option><option>两周内</option><option>本月内</option><option>暂不确定，先登记意向</option></select>
+          <select class="select" id="buWhen"><option>知识库项目交付后（推荐）</option><option>两周内</option><option>本月内</option><option>暂不确定，先登记意向</option></select>
         </div>
-        <div class="field" style="margin-bottom:0"><label class="field__label">备注</label><textarea class="textarea" placeholder="有什么特殊要求可以写在这里"></textarea></div>`,
+        <div class="field" style="margin-bottom:0"><label class="field__label">备注</label><textarea class="textarea" id="buNote" placeholder="有什么特殊要求可以写在这里"></textarea></div>`,
       okText: '提交开通申请',
-      onOk: () => toast('已登记，服务顾问会和你确认排期'),
+      onOk: async (back) => {
+        const when = back.querySelector('#buWhen').value;
+        const note = back.querySelector('#buNote').value.trim();
+        return (await submitTicket('service', `申请开通「${s.name}」`, `计划开始：${when}${note ? '\n备注：' + note : ''}`, S.org.contact || '')) ? undefined : false;
+      },
     });
   }
 
@@ -2252,11 +2263,14 @@
     const bi = qi('#btnInvite');
     if (bi) bi.onclick = () => openInvite(step);
 
-    qa('[data-remove]').forEach(b => b.onclick = () => {
+    qa('[data-remove]').forEach(b => b.onclick = async () => {
       const id = b.dataset.remove;
       const m = (S.members || []).find(x => x.id === id);
       if (!m) return;
-      S.members = S.members.filter(x => x.id !== id);
+      try {
+        if (window.LIVE && window.LIVE.on) await window.LIVE.removeMember(id);
+        else S.members = S.members.filter(x => x.id !== id);
+      } catch (e) { toast('移除失败：' + e.message, 'warn'); return; }
       TM.save();
       const reverted = syncStep8Checks(step);
       if (reverted) router();
@@ -2288,7 +2302,7 @@
       title: '记录试用反馈',
       desc: '员工说哪句话不顺手、哪个问题答错了，都值得记一笔。',
       body: `<div class="field"><label class="field__label">反馈内容 <i class="req">*</i></label>
-          <textarea class="textarea" id="fbTxt" placeholder="例如：问 HS-2041 的包装尺寸，答的是旧版规格"></textarea></div>
+          <textarea class="textarea" id="fbTxt" placeholder="例如：问保修期，答的是旧版政策"></textarea></div>
         <div class="field" style="margin-bottom:0"><label class="field__label">谁反馈的</label>
           <select class="select" id="fbWho">${staffMembers().map(m => `<option>${esc(m.name)}</option>`).join('') || '<option>管理员代记</option>'}</select></div>`,
       okText: '保存反馈',
@@ -2316,7 +2330,7 @@
         <div class="field" style="margin-bottom:0"><label class="field__label">角色</label>
           <select class="select" id="invRole"><option>销售员工</option><option>销售主管</option><option>技术</option><option>客服</option></select></div>`,
       okText: '添加成员',
-      onOk: (back) => {
+      onOk: async (back) => {
         const name = back.querySelector('#invName').value.trim();
         const email = back.querySelector('#invEmail').value.trim();
         const role = back.querySelector('#invRole').value;
@@ -2326,7 +2340,13 @@
           toast('这个邮箱已经在成员列表里了', 'warn');
           return false;
         }
-        S.members.push({ id: 'm' + Date.now(), name, email, role, status: 'active', at: TM.fmtDate(new Date()) });
+        try {
+          if (window.LIVE && window.LIVE.on) {
+            await window.LIVE.addMember({ name, email, role });
+          } else {
+            S.members.push({ id: 'm' + Date.now(), name, email, role, status: 'active', at: TM.fmtDate(new Date()) });
+          }
+        } catch (e) { toast('添加失败：' + e.message, 'warn'); return false; }
         TM.save();
         logAct(`添加成员 ${name}（${role}）`);
         if (step) renderStepPanel();
@@ -2390,22 +2410,47 @@
     return reverted;
   }
 
+  /* 所有「联系顾问」类弹窗统一真提交工单，不再是弹一句 toast 就消失。
+   * 工单落在服务端 data/tickets.json，服务商后台「人工协助请求」里能看到、能处理。 */
+  async function submitTicket(type, title, detail, contact) {
+    if (!(window.LIVE && window.LIVE.on)) {
+      toast('需要连上本地服务才能提交工单', 'warn');
+      return false;
+    }
+    try {
+      await window.LIVE.newTicket({ type, title, detail, contact });
+      toast('已提交，服务商后台的「人工协助请求」里能看到这条');
+      return true;
+    } catch (e) {
+      toast('提交失败：' + e.message, 'warn');
+      return false;
+    }
+  }
+
   function openAssist() {
     modal({
       title: '申请人工协助',
-      desc: '提交后服务顾问会在 4 小时内响应（工作日）。',
+      desc: '提交后工单会真实出现在服务商后台，服务顾问处理后能看到回复。',
       body: `<div class="field"><label class="field__label">卡在哪一步</label>
-          <select class="select">${STEPS.map(s => `<option ${s.id === activeStep ? 'selected' : ''}>第 ${s.id} 步 · ${s.title}</option>`).join('')}</select>
+          <select class="select" id="asStep">${STEPS.map(s => `<option ${s.id === activeStep ? 'selected' : ''}>第 ${s.id} 步 · ${s.title}</option>`).join('')}</select>
         </div>
-        <div class="field"><label class="field__label">遇到什么问题</label>
-          <textarea class="textarea" placeholder="描述得越具体，处理越快。例如：Docker 安装时报 WSL 相关错误"></textarea>
+        <div class="field"><label class="field__label">遇到什么问题 <i class="req">*</i></label>
+          <textarea class="textarea" id="asProblem" placeholder="描述得越具体，处理越快。例如：上传的 PDF 解析出来是空的"></textarea>
         </div>
+        <div class="field"><label class="field__label">联系方式</label>
+          <input class="input" id="asContact" value="${esc(S.org.contact || '')}" placeholder="方便联系的人或电话"></div>
         <label class="checkline is-checked" style="padding-left:0">
           <span class="checkline__box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
           <span class="checkline__txt">允许服务顾问查看本项目的部署状态与错误日志<span class="checkline__meta">仅限本项目，不含文件内容，可随时撤销</span></span>
         </label>`,
       okText: '提交工单',
-      onOk: () => toast('工单已提交，服务顾问会尽快联系你'),
+      onOk: async (back) => {
+        const problem = back.querySelector('#asProblem').value.trim();
+        if (!problem) { toast('写一下遇到的问题', 'warn'); return false; }
+        const step = back.querySelector('#asStep').value;
+        const contact = back.querySelector('#asContact').value.trim();
+        return (await submitTicket('assist', `【${step}】${problem.slice(0, 40)}`, problem, contact)) ? undefined : false;
+      },
     });
   }
 
@@ -2436,7 +2481,24 @@
     </div>`;
 
     qa('.tab').forEach(t => t.onclick = () => go('config', t.dataset.tab));
-    qi('#btnSync').onclick = () => toast('配置已与知识库引擎同步');
+    qi('#btnSync').onclick = async () => {
+      if (!(window.LIVE && window.LIVE.on)) return toast('需要连上本地服务才能同步', 'warn');
+      const b = qi('#btnSync');
+      b.disabled = true;
+      const old = b.innerHTML;
+      b.innerHTML = icon('refresh') + ' 同步中…';
+      try {
+        await window.LIVE.reload();
+        await window.LIVE.refreshMembers();
+        window.LIVE.paint();
+        router();
+        toast('已从服务端重新拉取模型、资料、助手与成员配置');
+      } catch (e) {
+        toast('同步失败：' + e.message, 'warn');
+        b.disabled = false;
+        b.innerHTML = old;
+      }
+    };
 
     const body = qi('#cfgBody');
     const renderers = { model: cfgModel, api: cfgApi, kb: cfgKb, docs: cfgDocs, assistant: cfgAssistant, prompt: cfgPrompt };
@@ -3225,95 +3287,91 @@
   }
 
   function cfgAssistant() {
+    const list = (window.LIVE && window.LIVE.assistants) || [];
+    const gaps = S.portalGaps || [];
     return `
       <div class="row--between mb16">
-        <span class="fs12 muted">共 3 个助手 · 覆盖产品、销售、售后三类问题</span>
+        <span class="fs12 muted">共 ${list.length} 个助手 · 配置在第 6 步，会真的进入出题与回答</span>
         <button class="btn btn--primary btn--sm" data-act="newAssistant">${icon('plus')} 新建助手</button>
       </div>
-      <div class="grid g3">
-        ${ASSISTANTS.map(a => `
-          <div class="card card--pad card--hover">
+
+      ${list.length ? `<div class="grid g3">
+        ${list.map(a => `
+          <div class="card card--pad">
             <div class="row--between" style="align-items:flex-start">
               <span style="width:34px;height:34px;border-radius:9px;background:var(--brand-50);color:var(--brand);display:grid;place-items:center">${icon('bot')}</span>
-              <span class="badge badge--success badge--dot">启用</span>
+              <span class="badge ${a.enabled === false ? '' : 'badge--success badge--dot'}">${a.enabled === false ? '停用' : '启用'}</span>
             </div>
             <div class="fs13 b6 mt12">${esc(a.name)}</div>
-            <p class="fs12 muted mt4" style="line-height:1.6;min-height:38px">${esc(a.role)}</p>
-            <div class="fs11 muted mt8">检索范围：${esc(a.scope)}</div>
+            <p class="fs12 muted mt4" style="line-height:1.6;min-height:38px">${esc(a.role || '')}${a.desc ? ' · ' + esc(a.desc) : ''}</p>
+            <div class="fs11 muted mt8">查：${esc((a.scope || []).join(' / ') || '全部资料')}</div>
+            <div class="fs11 muted mt4">规则：${esc(ruleChips(a) || '默认约束')}</div>
             <div class="row--between mt12" style="border-top:1px solid var(--border);padding-top:11px">
-              <span class="fs11 muted">近 7 天 <b class="fs12" style="color:var(--text)">${a.uses}</b> 次 · 好评 ${a.rate}</span>
-              <button class="btn btn--quiet btn--sm" style="padding:0 4px">${icon('more')}</button>
+              <span class="fs11 muted">${a.prompt ? '有专属提示词' : '用系统默认规则'}</span>
+              <button class="btn btn--quiet btn--sm" data-try-a="${esc(a.id)}">${icon('send')} 试问</button>
             </div>
           </div>`).join('')}
-      </div>
+      </div>` : `<div class="empty" style="padding:32px 0">${icon('bot')}<p class="fs12">还没有创建助手。点右上角「新建助手」，或到项目向导第 6 步从模板创建。</p></div>`}
 
       <div class="card card--pad mt16">
         <div class="row--between mb12">
-          <b class="fs13">最近被问得最多的问题</b>
-          <a class="fs12 muted" href="#logs">查看全部</a>
+          <b class="fs13">答不上来的问题</b>
+          <span class="fs11 muted">员工门户真实记录 · 按次数排序</span>
         </div>
         <div class="stack" style="gap:0">
-          ${[
-            ['HS-2041 的重量和材质？', 42, '产品知识助手'],
-            ['最小起订量和混装规则？', 31, '销售知识助手'],
-            ['客户要 30 天账期怎么回？', 26, '销售知识助手'],
-            ['售后换货运费谁承担？', 19, '售后政策助手'],
-          ].map(([q, n, a]) => `
-            <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:12px">
-              <span class="fs12 dim">${esc(q)}</span>
-              <div class="row" style="gap:10px;flex:0 0 auto">
-                <span class="tag tag--outline">${esc(a)}</span>
-                <span class="fs12 tnum b6" style="min-width:26px;text-align:right">${n}</span>
-              </div>
-            </div>`).join('')}
+          ${gaps.length
+            ? gaps.slice(0, 10).map(g => `
+              <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:12px">
+                <span class="fs12 dim">${esc(g.q)}</span>
+                <span class="badge">${g.n || 1} 次</span>
+              </div>`).join('')
+            : `<div class="fs12 muted" style="padding:14px 0">还没有记录。员工问到资料里没有的内容时，会自动出现在这里，可以照着补资料。</div>`}
         </div>
       </div>`;
   }
 
   function cfgPrompt() {
+    const list = (window.LIVE && window.LIVE.assistants) || [];
+    const FIXED = [
+      '只依据检索到的资料片段回答，不凭常识补',
+      '资料里没有就明确说没有，不编造',
+      '回答要标注出处（文件名 + 页码）',
+      '不回答其他客户、成本价、供应商相关信息',
+    ];
     return `
       <div class="grid g2" style="align-items:start;gap:18px">
         <div class="card card--pad">
           <div class="row--between mb12">
-            <div><b class="fs13">产品知识助手 · 回答规则</b><div class="fs11 muted mt4">所有回答都会遵守以下约束</div></div>
-            <span class="badge badge--brand">v3 · 已发布</span>
+            <div><b class="fs13">当前生效的助手设定</b><div class="fs11 muted mt4">读自第 6 步的真实配置，改动请到那里</div></div>
+            <button class="btn btn--ghost btn--sm" id="btnGoStep6">编辑助手</button>
           </div>
-          <textarea class="textarea" style="min-height:230px;font-family:var(--mono);font-size:12px;line-height:1.85">你是恒森进出口的产品资料助手，只回答与公司产品相关的问题。
-
-规则：
-1. 每个回答必须注明资料来源（文件名 + 页码）。
-2. 资料中没有的内容，直接回答「知识库中没有这部分资料」，不要推测。
-3. 涉及价格、交期、折扣的问题，不要给具体数字，引导联系销售。
-4. 遇到涉及其他客户信息、成本价、供应商的提问，一律拒绝。
-5. 用简洁的中文回答，参数类问题用列表呈现。</textarea>
-          <div class="row mt12" style="gap:8px">
-            <button class="btn btn--primary btn--sm">保存并生效</button>
-            <button class="btn btn--ghost btn--sm">用 5 道题试跑</button>
-            <span class="fs11 muted" style="margin-left:auto">上次修改：11-12 09:40</span>
-          </div>
+          ${list.length ? list.map(a => `
+            <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+              <div class="row--between"><b class="fs12">${esc(a.name)}</b><span class="tag tag--outline">${esc(a.tone || '默认语气')}</span></div>
+              <div class="fs11 muted mt4">岗位：${esc(a.role || '未填')} · 范围：${esc((a.scope || []).join('/') || '全部资料')}</div>
+              <div class="fs11 muted mt4">规则：${esc(ruleChips(a) || '默认约束')}</div>
+              ${a.prompt ? `<div class="fs12 mt8" style="line-height:1.7;padding:9px 11px;background:var(--surface-2);border-radius:8px;white-space:pre-wrap">${esc(a.prompt)}</div>` : ''}
+            </div>`).join('')
+            : `<div class="fs12 muted" style="padding:18px 0">还没有助手，也就没有专属提示词。到第 6 步创建后，这里的设定会真的写进每一次模型调用。</div>`}
         </div>
 
         <div class="stack" style="gap:16px">
           <div class="card card--pad">
-            <b class="fs13">拒答边界</b>
-            <p class="fs11 muted mt4 mb12">命中以下情况时，助手不会回答</p>
+            <b class="fs13">系统固定约束</b>
+            <p class="fs11 muted mt4 mb12">这几条写死在系统提示里，助手配置改不掉</p>
             <div class="stack" style="gap:8px">
-              ${['其他客户的报价与订单信息', '产品成本价、供应商名称', '员工个人信息与薪资', '未经确认的认证与合规声明'].map(t => `
+              ${FIXED.map(t => `
                 <div class="row" style="gap:8px;font-size:12px;color:var(--text-2)">
                   <span style="color:var(--danger);display:flex">${icon('shield')}</span>${esc(t)}
                 </div>`).join('')}
             </div>
           </div>
           <div class="card card--pad">
-            <b class="fs13">助手配置</b>
-            <div class="tl mt12">
-              ${(window.LIVE && window.LIVE.assistants && window.LIVE.assistants.length)
-                ? window.LIVE.assistants.map(a => `
-                    <div class="tl-item tl-item--done">
-                      <b>${esc(a.name)}</b>
-                      <span>${a.prompt ? '已配置专属提示词' : '用默认规则'} · ${esc(a.scope?.join('/') || '全部资料')}</span>
-                    </div>`).join('')
-                : `<div class="tl-item"><b>还没有创建助手</b><span>到第 6 步创建</span></div>`}
+            <b class="fs13">改配置会怎样</b>
+            <p class="fs12 muted mt8" style="line-height:1.7">提示词、语气和回答规则会拼进 system prompt；资料范围在检索阶段过滤，范围外的切片根本不会交给模型。第 7 步出题和第 8 步员工门户都按选中的助手走。</p>
+            <div class="row mt12" style="gap:8px">
+              <button class="btn btn--ghost btn--sm" id="btnGoStep6b">去第 6 步改</button>
+              <button class="btn btn--ghost btn--sm" id="btnGoPortal">去门户试一句</button>
             </div>
           </div>
         </div>
@@ -3324,13 +3382,20 @@
     const cem = qi('#cfgEditModel');
     if (cem) cem.onclick = () => { location.hash = '#wizard/5'; toast('到第 5 步更换模型或 Key'); };
 
-    qa('.switch', body).forEach(sw => sw.onclick = () => {
-      sw.classList.toggle('is-on');
-      toast('设置已保存');
-    });
-
     const g5 = qi('#btnGoStep5');
     if (g5) g5.onclick = () => { location.hash = '#wizard/5'; };
+
+    ['#btnGoStep6', '#btnGoStep6b'].forEach(sel => {
+      const b = qi(sel);
+      if (b) b.onclick = () => { location.hash = '#wizard/6'; };
+    });
+    const gp = qi('#btnGoPortal');
+    if (gp) gp.onclick = () => { location.hash = '#portal'; };
+
+    qa('[data-try-a]', body).forEach(b => b.onclick = () => {
+      const a = (window.LIVE.assistants || []).find(x => x.id === b.dataset.tryA);
+      if (a) openAssistantTry(a);
+    });
 
     qa('[data-act]', body).forEach(b => b.onclick = async () => {
       const a = b.dataset.act;
@@ -3454,12 +3519,40 @@
             ].map(([k, v]) => `<div class="row--between" style="padding:9px 0;border-bottom:1px solid var(--border)">
               <span class="fs12 muted">${k}</span><span class="fs12 b5">${esc(v)}</span></div>`).join('')}
           </div>
-          <div class="field mt16" style="margin-bottom:0"><label class="field__label">调整角色</label>
-            <select class="select"><option ${m.role === '企业管理员' ? 'selected' : ''}>企业管理员</option><option ${m.role === '销售主管' ? 'selected' : ''}>销售主管</option><option ${m.role === '销售员工' ? 'selected' : ''}>销售员工</option><option ${m.role === '技术' ? 'selected' : ''}>技术</option><option ${m.role === '客服' ? 'selected' : ''}>客服</option></select>
+          <div class="grid g2 mt16" style="gap:12px">
+            <div class="field"><label class="field__label">姓名</label>
+              <input class="input" id="mmName" value="${esc(m.name || '')}"></div>
+            <div class="field"><label class="field__label">角色</label>
+              <select class="select" id="mmRole">
+                ${['企业管理员', '销售主管', '销售员工', '技术', '客服', '服务顾问'].map(r => `<option ${m.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+              </select></div>
+            <div class="field"><label class="field__label">邮箱</label>
+              <input class="input" id="mmEmail" value="${esc(m.email || '')}" placeholder="可留空"></div>
+            <div class="field" style="margin-bottom:0"><label class="field__label">手机</label>
+              <input class="input" id="mmPhone" value="${esc(m.phone || '')}" placeholder="可留空"></div>
           </div>`,
+        wide: true,
         okText: '保存',
         cancelText: '关闭',
-        onOk: () => toast('成员设置已更新'),
+        onOk: async (back) => {
+          const patch = {
+            name: back.querySelector('#mmName').value.trim(),
+            role: back.querySelector('#mmRole').value,
+            email: back.querySelector('#mmEmail').value.trim(),
+            phone: back.querySelector('#mmPhone').value.trim(),
+          };
+          if (!patch.name) { toast('姓名不能为空', 'warn'); return false; }
+          try {
+            if (window.LIVE && window.LIVE.on) {
+              await window.LIVE.editMember(m.id, patch);
+            } else {
+              Object.assign(m, patch);
+              TM.save();
+            }
+            toast('成员信息已更新');
+            router();
+          } catch (e) { toast('保存失败：' + e.message, 'warn'); return false; }
+        },
       });
     });
   }
@@ -3467,54 +3560,59 @@
   /* =====================================================================
      6. 测试与验收
      ===================================================================== */
-  const TEST_TYPES = [
-    ['产品知识测试', '产品重量、尺寸、材料、包装、认证是否回答正确', 24],
-    ['销售流程测试', '能否正确解释报价流程、付款方式、交期、MOQ', 14],
-    ['邮件任务测试', '能否生成符合公司口吻的英文询盘回复', 8],
-    ['安全边界测试', '是否会泄露其他客户信息、成本价或越权内容', 4],
-  ];
-
   function renderTest(root) {
     const report = S.project.report;
 
     if (!report) {
-      const ran = S.project.testRun && S.project.testRun.ran;
+      const s = testStats();
+      const Q = TM.TEST_QUESTIONS;
+      const liveOn = !!(window.LIVE && window.LIVE.on);
+      const chunks = (liveOn && window.LIVE.kb && window.LIVE.kb.chunks) || 0;
+      const asstN = (liveOn && window.LIVE.assistants || []).length;
+      const withAnswer = Q.filter(q => q.a && !/没有生成回答/.test(q.a)).length;
+      const withCite = Q.filter(q => q.cite && q.cite !== '—').length;
+
       root.innerHTML = `<div class="page page--narrow">
-        ${pageHead('测试与验收', '「知识库建好了」和「知识库能用」是两件事。这一步用 50 道题把它们区分开。',
-          `<span class="badge badge--warn badge--dot">尚未测试</span>`)}
+        ${pageHead('测试与验收', '「知识库建好了」和「知识库能用」是两件事。下面每个数字都来自你当前真实的资料与测试记录。',
+          `<span class="badge badge--warn badge--dot">${s.ran ? '报告待生成' : '尚未测试'}</span>`)}
 
         <div class="card card--pad mb20" style="display:flex;gap:22px;align-items:center">
           <span class="ico-lg" style="width:52px;height:52px;border-radius:14px;background:var(--brand-50);color:var(--brand);display:grid;place-items:center;flex:0 0 52px">${icon('target')}</span>
           <div style="flex:1">
-            <div class="fs15 b6 mb4">${ran ? '测试已运行，报告还没有生成' : '项目已具备测试条件'}</div>
-            <p class="fs12 muted" style="line-height:1.65">${ran
-              ? `50 道题已经跑完，还差核对关键题并生成报告这一步。`
-              : '知识库已构建（1,284 个切片），3 个助手已挂载。到项目向导第 7 步生成测试题、批量运行，再抽检 10 道关键题。'}</p>
+            <div class="fs15 b6 mb4">${s.ran ? '测试已运行，报告还没有生成' : '还没有生成测试题'}</div>
+            <p class="fs12 muted" style="line-height:1.65">${s.ran
+              ? `已生成 ${s.total} 道题、${withAnswer} 道有回答、${s.judged} 道已人工判定。到第 7 步核对完并生成报告。`
+              : `知识库${chunks ? ` ${chunks} 个切片` : '尚未建库'}、${asstN} 个助手。到项目向导第 7 步生成测试题、批量运行，再逐题核对。`}</p>
           </div>
-          <a class="btn btn--primary btn--lg" href="#wizard/7">${icon('arrowRight')} ${ran ? '去生成报告' : '到第 7 步开始测试'}</a>
+          <a class="btn btn--primary btn--lg" href="#wizard/7">${icon('arrowRight')} ${s.ran ? '去生成报告' : '到第 7 步开始测试'}</a>
         </div>
 
-        ${sectionHead('四类测试', '共 50 题 · 覆盖真实业务场景')}
+        ${sectionHead('当前测试概况', '实时读自第 7 步，不是预置题库')}
         <div class="grid g2">
-          ${TEST_TYPES.map(([n, d, c]) => `
+          ${[
+            ['测试题总数', String(s.total), '由模型从你上传的资料里生成'],
+            ['已运行', String(withAnswer), '已经拿到回答的题目'],
+            ['已人工判定', `${s.judged} / ${s.total}`, '通过 / 需修改 / 资料不足'],
+            ['当前通过率', s.judged ? s.rate + '%' : '—', s.pending ? `还有 ${s.pending} 道待判定` : '全部判定完毕'],
+          ].map(([n, v, d]) => `
             <div class="card card--pad">
               <div class="row--between">
                 <div class="fs13 b6">${n}</div>
-                <span class="badge">${c} 题</span>
+                <span class="badge">${esc(v)}</span>
               </div>
-              <p class="fs12 muted mt8" style="line-height:1.65">${d}</p>
+              <p class="fs12 muted mt8" style="line-height:1.65">${esc(d)}</p>
             </div>`).join('')}
         </div>
 
         ${sectionHead('验收标准', '开始前已约定，达不到不进入验收')}
         <div class="card" style="overflow:hidden">
           <table class="table">
-            <thead><tr><th>指标</th><th style="width:140px">验收线</th><th style="width:150px">当前</th></tr></thead>
+            <thead><tr><th>指标</th><th style="width:140px">验收线</th><th style="width:180px">当前</th></tr></thead>
             <tbody>
-              <tr><td class="fs12">测试题通过率</td><td class="fs12 b5">≥ 85%（43/50）</td><td class="fs12 muted">待测试</td></tr>
-              <tr><td class="fs12">安全边界测试</td><td class="fs12 b5">100% 通过</td><td class="fs12 muted">待测试</td></tr>
-              <tr><td class="fs12">回答必须带出处</td><td class="fs12 b5">100% 覆盖</td><td class="fs12 muted">待测试</td></tr>
-              <tr><td class="fs12">无答案时明确拒答</td><td class="fs12 b5">不允许编造</td><td class="fs12 muted">待测试</td></tr>
+              <tr><td class="fs12">测试题通过率</td><td class="fs12 b5">≥ 85%</td><td class="fs12 muted">${s.judged ? `${s.rate}%（已判定 ${s.judged} 道）` : '还没有判定'}</td></tr>
+              <tr><td class="fs12">全部题目人工判定</td><td class="fs12 b5">100%</td><td class="fs12 muted">${s.judged} / ${s.total}</td></tr>
+              <tr><td class="fs12">回答必须带出处</td><td class="fs12 b5">100% 覆盖</td><td class="fs12 muted">${withCite} / ${withAnswer} 道有出处</td></tr>
+              <tr><td class="fs12">资料缺口已记录</td><td class="fs12 b5">逐条记录</td><td class="fs12 muted">${s.gap} 条</td></tr>
             </tbody>
           </table>
         </div>
@@ -3608,16 +3706,72 @@
       </div>
     </div>`;
 
-    qi('#btnDownload').onclick = () => toast('报告已生成 PDF，可在项目档案中下载');
-    qi('#btnRerun').onclick = () => { toast('已提交重新测试任务', 'info'); setTimeout(() => { S.project.report = null; TM.save(); ROUTES.test.render(view); }, 700); };
+    /* 下载的是当前真实测试记录，不是一句「PDF 已生成」 */
+    qi('#btnDownload').onclick = () => {
+      const Q = TM.TEST_QUESTIONS;
+      const marks = (S.project.testRun && S.project.testRun.marks) || {};
+      const s = testStats();
+      const rows = [
+        [`${S.org.name || '企业'} · 知识库验收报告`, new Date().toLocaleString('zh-CN')],
+        [],
+        ['总题数', s.total, '已判定', s.judged, '通过率', (s.judged ? s.rate + '%' : '—')],
+        ['通过', s.pass, '需修改', s.fix, '资料不足', s.gap],
+        [],
+        ['题号', '问题', 'AI 回答', '引用出处', '人工判定', '是否关键'],
+      ];
+      Q.forEach(q => rows.push([
+        q.id, q.q, q.a || '', q.cite || '',
+        ({ pass: '通过', fix: '需修改', gap: '资料不足' })[marks[q.id]] || '未判定',
+        q.key ? '关键' : '',
+      ]));
+      const csv = '\uFEFF' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `验收报告-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast(`已下载验收报告（${s.total} 道题）`);
+    };
+
+    /* 重新测试 = 真的再跑一遍模型，不是把报告藏起来 */
+    qi('#btnRerun').onclick = () => modal({
+      title: '重新运行测试',
+      desc: '会按当前资料与所选助手，重新逐题调用模型。',
+      body: `<div class="note note--warn">${icon('alert')}<span>重新运行会清空现有的人工判定，需要重新逐题核对。会消耗少量模型额度。</span></div>`,
+      okText: '确认重跑',
+      onOk: async () => {
+        if (!(window.LIVE && window.LIVE.on)) { toast('需要连上本地服务才能重跑', 'warn'); return false; }
+        try {
+          await window.LIVE.runTests(testAsstId);
+          S.project.report = null;
+          TM.save();
+          window.LIVE.paintTests();
+          toast('已重新运行，去第 7 步核对新结果');
+          setTimeout(() => go('wizard', '7'), 500);
+        } catch (e) { toast('重跑失败：' + e.message, 'warn'); return false; }
+      },
+    });
+
     qi('#btnAccept').onclick = () => modal({
       title: '确认项目验收',
-      desc: '确认后项目进入正式交付，管理员账号将移交给你。',
-      body: `<div class="note note--brand mb16">${icon('info')}<span>待整改的 5 项已记录处理期限（3 个工作日内）。整改完成后会更新验收报告，不影响本次确认。</span></div>
-        <label class="checkline"><span class="checkline__box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="checkline__txt">我已查看测试报告与待整改清单</span></label>
-        <label class="checkline"><span class="checkline__box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="checkline__txt">我确认权限配置与备份策略符合要求</span></label>`,
+      desc: '确认后会记录验收动作，项目进入正式交付。',
+      body: `<div class="note note--brand mb16">${icon('info')}<span>当前报告里还有 ${issues.length} 项待整改（需修改 / 资料不足）。这些会写进验收记录，后续补资料或改提示词时可以再复测。</span></div>
+        <label class="checkline is-checked"><span class="checkline__box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="checkline__txt">我已查看测试报告与待整改清单</span></label>
+        <label class="checkline is-checked"><span class="checkline__box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="checkline__txt">我确认权限配置与备份策略符合要求</span></label>`,
       okText: '确认验收',
-      onOk: () => { toast('已确认验收，进入第 10 步正式交付'); setTimeout(() => go('wizard', '10'), 700); },
+      onOk: () => {
+        S.project.accepted = {
+          at: new Date().toISOString(),
+          by: S.user.name,
+          rate: testStats().rate,
+          issues: issues.length,
+        };
+        TM.save();
+        logAct('确认项目验收');
+        toast('验收已记录，进入第 10 步正式交付');
+        setTimeout(() => go('wizard', '10'), 600);
+      },
     });
     qi('#btnAssist2').onclick = openAssist;
   }
@@ -3625,39 +3779,8 @@
   /* =====================================================================
      7. 员工门户
      ===================================================================== */
-  const QA_BANK = [
-    {
-      k: ['重量', '多重', '克', 'hs-2041'],
-      a: 'HS-2041 棘轮扳手的净重是 <b>728 g</b>（含包装 812 g），长度为 250 mm，材质为 CR-V 铬钒钢。',
-      cite: ['产品规格表.xlsx · 第 2 表', '产品目录_2026.pdf · P.28'],
-    },
-    {
-      k: ['账期', '30 天', '付款', '付款方式', '定金'],
-      a: '新客户标准条件为 <b>30% 定金 + 见提单副本付尾款</b>。老客户合作满 6 个月、且无逾期记录的，可以申请 15 天账期，需要销售主管审批。30 天账期目前只对年采购额 50 万以上的客户开放。',
-      cite: ['外贸销售SOP.pdf · P.12'],
-    },
-    {
-      k: ['moq', '起订', '最小', '混装'],
-      a: '单 SKU 最小起订量 <b>500 件</b>。可以混装，但一箱内不超过 3 个型号，且每个型号不少于 100 件。混装会额外收取 8% 的包装费。',
-      cite: ['外贸销售SOP.pdf · P.8'],
-    },
-    {
-      k: ['证书', 'ce', '认证', 'epr'],
-      a: '知识库中<b>没有</b>这部分资料，我不能给你一个可能错误的答案。<br><br>建议：向技术部索取 CE 证书扫描件与 EPR 注册号，上传到「产品资料」分类后，我就能回答了。',
-      cite: [],
-      gap: true,
-    },
-    {
-      k: ['交期', '推迟', '延迟'],
-      a: '可以这样回复（英文草稿）：<br><br><i>Dear [Name],<br><br>We would like to inform you that the delivery of your order [PO No.] will be delayed by two weeks due to a shortage of raw material for the [product] series. The new estimated shipping date is [date].<br><br>To minimize the impact, we can arrange partial shipment of the available items first, at no extra cost. Please let us know if this works for you.<br><br>We apologize for the inconvenience and appreciate your understanding.</i><br><br>要点：先说明原因，再给新日期，最后主动给一个补偿方案（分批出货），比单纯道歉更容易被接受。',
-      cite: ['外贸销售SOP.pdf · P.16'],
-    },
-    {
-      k: ['运费', '换货', '售后', '退换'],
-      a: '要分两种情况：<br><br><b>质量问题</b>：我方承担往返运费，客户可选择换货或退款。<br><b>非质量问题</b>（选错型号、下单错误）：往返运费由客户承担，我们可协助安排物流。<br><br>质保期为出货日起 12 个月。',
-      cite: ['售后政策.pdf · P.5'],
-    },
-  ];
+  /* 演示问答库已清空：员工门户只走真实检索 + 模型，不再内置别人的产品答案 */
+  const QA_BANK = [];
 
   function renderPortal(root) {
     const liveOn = !!(window.LIVE && window.LIVE.on);
@@ -3667,8 +3790,8 @@
     if (curAsst) portalAsstId = curAsst.id;
     const docN = liveOn ? (window.LIVE.docs || []).length : (S.project.files || []).length;
 
-    /* 快捷问题只在纯演示（非 live）时给样例。真实客户进来不该看到别人的问题。 */
-    const hot = liveOn ? [] : ['HS-2041 的重量是多少？', '客户要 30 天账期怎么回复？', '最小起订量和混装规则？'];
+    /* 快捷问题不再预置别人的产品问题；员工自己问 */
+    const hot = [];
 
     /* 答不上来的问题：真的记录员工问过、库里也确实没有的，
      * 以前这里是写死的三条示例，客户会以为系统在替别人算账 */
@@ -4032,11 +4155,15 @@
     </div>`;
 
     bindCompanyForm(null);
+    /* 以前这里叫「重置演示数据」，其实只清浏览器缓存，服务端客户资料一个没动，
+       还会骗人说「回到第 6 步」。现在把两种清空方式讲清楚，各自只做自己能做的事。 */
     qi('#btnReset').onclick = () => modal({
-      title: '重置演示数据',
-      desc: '会清空本浏览器内的所有进度与配置。',
-      body: `<div class="note note--warn">${icon('alert')}<span>这个操作不可撤销。重置后项目会回到第 6 步，已勾选的检查项和测试报告都会清空。</span></div>`,
-      okText: '确认重置',
+      title: '清空数据',
+      desc: '客户、资料、进度都存在本机服务端，不在浏览器里。',
+      body: `<div class="note note--warn mb12">${icon('alert')}<span><b>要清空全部客户与资料</b>：关闭服务后，双击项目目录里的「清空所有数据.bat」，输入 YES 确认。它会自动先备份到 backup/，并保留模型 Key。</span></div>
+        <div class="note note--info">${icon('info')}<span><b>只想清浏览器缓存</b>：点下面的按钮。这只清本浏览器的本地状态，重新打开会从服务端拉回真实数据，不会删任何客户资料。</span></div>`,
+      okText: '仅清除浏览器缓存',
+      cancelText: '取消',
       onOk: () => { TM.reset(); sessionStorage.removeItem('tm_entered'); location.href = 'index.html'; },
     });
   }
@@ -4051,30 +4178,60 @@
     desc: '每个企业的工作空间彼此隔离，资料与项目互不可见。',
     body: `<div class="stack" style="gap:9px">
         <div class="cfg-row" style="border-color:var(--brand);background:var(--brand-50)">
-          <span class="avatar avatar--sq" style="background:#1F4A52">恒</span>
-          <div class="cfg-row__body"><b>${esc(S.org.name)}</b><span>${esc(S.org.industry)} · ${esc(S.org.size)} · 当前</span></div>
+          <span class="avatar avatar--sq" style="background:#1F4A52">${esc((S.org.short || S.org.name || '企').slice(0, 1))}</span>
+          <div class="cfg-row__body"><b>${esc(S.org.name)}</b><span>${esc([S.org.industry, S.org.city, S.org.size].filter(Boolean).join(' · ') || '信息未填写')} · 当前</span></div>
           <span style="color:var(--brand);display:flex">${icon('checkCircle')}</span>
         </div>
-        <div class="cfg-row" style="opacity:.6">
-          <span class="avatar avatar--sq" style="background:#4A3A5E">拓</span>
-          <div class="cfg-row__body"><b>厦门拓洋贸易有限公司</b><span>无访问权限 · 需由该企业管理员添加</span></div>
-          <span style="color:var(--text-4);display:flex">${icon('lock')}</span>
-        </div>
       </div>
-      <div class="note mt16">${icon('shield')}<span>你只能看到自己所属的企业。跨企业访问需要对方管理员邀请，且权限限于被邀请的项目。</span></div>`,
+      <div class="note mt16">${icon('shield')}<span>要切换到别的企业，请回服务商后台，在客户列表点「进入」。这里不会再列出无权访问的企业。</span></div>`,
     okText: '知道了',
     cancelText: '关闭',
   });
 
-  qi('#btnSearch').onclick = () => modal({
-    title: '搜索',
-    desc: '演示环境：搜索项目、资料、成员。',
-    body: `<input class="input" placeholder="输入关键词，例如：HS-2041、销售 SOP、李婉" autofocus>
-      <div class="fs11 muted mt12">最近搜索：产品规格表 · 第 7 步 · 验收报告</div>`,
-    okText: '搜索',
-    cancelText: '取消',
-    onOk: () => toast('演示环境：搜索结果未接入', 'info'),
-  });
+  /* 真搜索：资料、助手、测试题、成员、步骤，点了能直接跳过去 */
+  qi('#btnSearch').onclick = () => {
+    const m = modal({
+      title: '全局搜索',
+      desc: '搜资料、AI 助手、测试题、成员和项目步骤。',
+      body: `<input class="input" id="gsQ" placeholder="输入关键词，例如：报价、保修、张浩" autofocus>
+        <div id="gsOut" class="mt14"></div>`,
+      okText: '关闭',
+      cancelText: '取消',
+      wide: true,
+    });
+    const inp = m.root.querySelector('#gsQ');
+    const out = m.root.querySelector('#gsOut');
+
+    const run = () => {
+      const kw = inp.value.trim().toLowerCase();
+      if (!kw) { out.innerHTML = '<div class="fs12 muted">输入关键词开始搜索</div>'; return; }
+      const hits = [];
+      const push = (type, label, hash) => hits.push([type, label, hash]);
+      const has = (v) => String(v || '').toLowerCase().includes(kw);
+
+      (S.project.files || []).forEach(f => { if (has(f.name)) push('资料', f.name, 'wizard/3'); });
+      ((window.LIVE && window.LIVE.docs) || []).forEach(d => { if (has(d.name)) push('资料', d.name, 'wizard/3'); });
+      ((window.LIVE && window.LIVE.assistants) || []).forEach(a => {
+        if (has(a.name) || has(a.role) || has(a.desc)) push('助手', `${a.name} · ${a.role}`, 'wizard/6');
+      });
+      TM.TEST_QUESTIONS.forEach(q => { if (has(q.q)) push('测试题', q.q.slice(0, 46), 'wizard/7'); });
+      (S.members || []).forEach(p => {
+        if (has(p.name) || has(p.email) || has(p.role)) push('成员', `${p.name} · ${p.role}`, 'members');
+      });
+      TM.STEPS.forEach(s => {
+        if (has(s.title) || has(s.what)) push('步骤', `第 ${s.id} 步 · ${s.title}`, 'wizard/' + s.id);
+      });
+
+      out.innerHTML = hits.length
+        ? `<div class="fs11 muted mb8">找到 ${hits.length} 条</div>` + hits.slice(0, 20).map(([t, label, hash]) =>
+            `<button class="btn btn--ghost btn--sm btn--block" data-go="${esc(hash)}" style="justify-content:flex-start;margin-bottom:6px;text-align:left"><b>${esc(t)}</b> · ${esc(label)}</button>`).join('')
+        : '<div class="fs12 muted">没找到相关内容。换个说法，或者先把资料传进知识库。</div>';
+      qa('[data-go]', out).forEach(b => b.onclick = () => { m.close(); location.hash = '#' + b.dataset.go; });
+    };
+    inp.oninput = run;
+    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); const f = qa('[data-go]', out)[0]; if (f) f.click(); } };
+    run();
+  };
 
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); qi('#btnSearch').click(); }
