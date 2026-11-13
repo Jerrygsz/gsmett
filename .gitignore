@@ -3,3 +3,11 @@ data/
 backup/
 testsample/
 *.log
+
+# 密钥相关：任何位置都不要进仓库
+# （data/ 已整体忽略，这几行是防手滑把文件挪到根目录）
+.machine-salt
+config.local.json
+*.key
+.env
+.env.*

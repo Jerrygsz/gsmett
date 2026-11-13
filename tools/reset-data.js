@@ -19,6 +19,7 @@ const DATA = path.join(ROOT, 'data');
 const CLIENTS = path.join(DATA, 'clients');
 const INDEX = path.join(DATA, 'clients.json');
 const CONFIG = path.join(DATA, 'config.json');
+const SALT = path.join(DATA, '.machine-salt');
 
 const noBackup = process.argv.includes('--no-backup');
 
@@ -61,6 +62,9 @@ if (!noBackup && fs.existsSync(CLIENTS)) {
   fs.cpSync(CLIENTS, path.join(dir, 'clients'), { recursive: true });
   if (fs.existsSync(INDEX)) fs.copyFileSync(INDEX, path.join(dir, 'clients.json'));
   if (fs.existsSync(CONFIG)) fs.copyFileSync(CONFIG, path.join(dir, 'config.json'));
+  /* 盐必须跟配置一起备份。Key 是用「本机指纹 + 盐」加密的，
+   * 只备份 config.json 不备份盐，恢复时解不开 Key，只能重填。 */
+  if (fs.existsSync(SALT)) fs.copyFileSync(SALT, path.join(dir, '.machine-salt'));
   console.log(`  已备份到：backup/${path.basename(dir)}`);
 }
 
@@ -76,8 +80,9 @@ let keyState = '未配置（第 5 步需要自己填）';
 try {
   const c = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
   if (c.llm?.apiKey) {
-    const k = c.llm.apiKey;
-    keyState = `已保留 ${k.slice(0, 6)}••••${k.slice(-4)}（${c.llm.model}）`;
+    keyState = String(c.llm.apiKey).startsWith('enc1:')
+      ? `已保留（加密存储，${c.llm.model}）`
+      : `已保留（⚠ 明文存储，重启服务后会自动加密）`;
   }
 } catch { }
 

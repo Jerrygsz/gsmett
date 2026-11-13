@@ -13,11 +13,21 @@
 
 ```bash
 npm install     # 只需一次
-npm start       # 启动，监听 0.0.0.0:8787
+npm start       # 启动，默认只监听 127.0.0.1:8787
 ```
 
-启动后终端会打印局域网地址（如 `http://192.168.1.104:8787`），
-同一个 WiFi 下的其他电脑和手机可以直接打开 —— 多人试用时用这个地址。
+**默认只允许本机访问**，因为这个服务没有登录鉴权——一旦开放到局域网，
+同网络里的任何人都能调用 `/api/clients/:id/chat`，用你的模型额度白嫖。
+
+确实要让手机或同事打开时，显式放开：
+
+```bash
+HOST=0.0.0.0 npm start        # macOS / Linux / Git Bash
+$env:HOST="0.0.0.0"; npm start # Windows PowerShell
+```
+
+终端会打印局域网地址（如 `http://192.168.1.104:8787`）和一行警告。
+只在可信网络里这么用，用完就关。
 
 ## 三步走完一轮
 
@@ -49,15 +59,18 @@ Windows 家庭版也没有 Hyper-V，Docker Desktop 装不上。改用 Node 自�
 
 - 客户不填 Key 时自动用平台的，第 5 步直接显示「平台已内置模型 · 已就绪」。
 - 企业想用自己的账号，在第 5 步点「改用我自己的 Key」填进去，优先级高于平台 Key。
-- 想换平台 Key：改 `data/config.json` 的 `llm.apiKey`，或 `POST /api/platform/llm`（会先真发一次请求验证）。
-- 浏览器永远拿不到明文 Key，接口只返回 `sk-5fb••••76d1` 这种打码形式。
+- 想换平台 Key：跑 `node tools/set-key.js`（推荐，交互输入不会进命令历史，会先验证再加密保存），
+  或 `POST /api/platform/llm`（同样先真发一次请求验证）。
+- **不要手改 `data/config.json` 里的 `apiKey`**——那里存的是密文，手写明文虽然能用（服务会自动识别并加密），
+  但明文会先在磁盘上停留一下，没必要。
+- 浏览器永远拿不到明文 Key，接口只返回 `sk-••••76d1` 这种打码形式。
 
 如果 `data/config.json` 不存在（比如刚 clone 下来），就回到手动填的模式：
 
 第 5 步要填一个模型 API Key，不然第 7 步出不了题、门户也给不出回答（只能返回原文片段）。
 
 推荐 DeepSeek：`platform.deepseek.com` 注册 → API keys → 创建。
-充 10 元能用很久，中文效果够用。Key 存在本机 `data/` 目录，
+充 10 元能用很久，中文效果够用。Key 加密后存在本机 `data/` 目录，
 只用于调用模型，不会上传到任何地方。
 
 也支持通义千问、智谱、月之暗面、OpenAI，表单里换服务商会自动填好接口地址。
@@ -66,7 +79,8 @@ Windows 家庭版也没有 Hyper-V，Docker Desktop 装不上。改用 Node 自�
 
 ```
 data/
-  config.json               平台内置模型 Key（不进 Git）
+  config.json               平台内置模型 Key（加密存储，不进 Git）
+  .machine-salt             加密用的随机盐（换机器解不开，不要外传）
   clients.json              客户列表
   clients/<id>/state.json   企业信息、步骤进度、成员、模型配置
   clients/<id>/docs.json    资料元数据（文件名、页数、字数）
@@ -74,14 +88,52 @@ data/
   clients/<id>/uploads/     你上传的原始文件
 ```
 
-备份就复制整个 `data/` 目录。删客户会连同资料一起删除。
+备份就复制整个 `data/` 目录（**要连 `.machine-salt` 一起**，否则 Key 解不开）。删客户会连同资料一起删除。
+
+## API Key 怎么存的
+
+**存的是密文，不是明文。**
+
+`data/config.json` 和客户 `state.json` 里的 `apiKey` 长这样：
+
+```json
+"apiKey": "enc1:W21FNxAKA8WhUttX:oRyvgV/vCwAv3ppADtOV3w==:nN99QVhy..."
+```
+
+算法是 AES-256-GCM，密钥由 **主机名 + 系统用户名 + `data/.machine-salt`** 用 scrypt 派生。
+
+**能挡住：**
+
+- 备份目录、`data/` 被复制到别的电脑 → 解不开
+- 误传网盘 / 发微信 / 提交 Git → 看到的是乱码
+- 硬盘被单独拆走读盘 → 换机器解不开
+
+**挡不住（必须说清楚）：**
+
+- 你这台电脑上、用你这个 Windows 账号跑的任何程序，都能解密。要挡这个得用系统凭据库（Windows DPAPI），需要额外原生模块，本机装不上
+- 服务运行期间，Key 一定存在于进程内存里
+- **没有登录鉴权的服务不要绑到局域网**。所以服务默认只监听 `127.0.0.1`，同 WiFi 的人访问不到
+
+换 Key 不用开浏览器：
+
+```bash
+node tools/set-key.js          # 交互输入，会先验证能用再保存
+```
+
+旧数据里如果有明文 Key，服务启动时会自动加密，日志会打印「已将 N 处明文 Key 加密存储」。
+
+想确认当前状态：
+
+```bash
+grep -r "sk-" data/ --include="*.json"   # 应该一条都搜不到
+```
 
 ## 想从零开始：清空所有数据
 
 双击 `清空所有数据.bat`，输入 `YES` 确认。它会：
 
 - 清空所有客户、项目进度、上传的资料、知识库索引、测试记录、成员、反馈
-- 自动备份到 `backup/data-<时间戳>/`（想找回就复制回去）
+- 自动备份到 `backup/data-<时间戳>/`（想找回就复制回去，含 `.machine-salt`）
 - **保留** `data/config.json` 里的模型 Key，不用重新配
 
 也可以直接跑 `node tools/reset-data.js`（加 `--no-backup` 跳过备份）。

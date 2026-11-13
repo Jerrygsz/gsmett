@@ -25,7 +25,10 @@ import {
 } from './store.js';
 
 const PORT = Number(process.env.PORT || 8787);
-const HOST = process.env.HOST || '0.0.0.0';
+/* 默认只绑本机回环：同 WiFi 的其他人访问不到这个服务。
+ * 这个服务没有登录鉴权，一旦绑 0.0.0.0，别人就能用你的 Key 白嫖额度。
+ * 真要让手机/同事访问，再显式设 HOST=0.0.0.0 启动，并清楚这是对外开放。 */
+const HOST = process.env.HOST || '127.0.0.1';
 const MAX_UPLOAD = 80 * 1024 * 1024; // 80MB
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -992,12 +995,19 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
+  const open = HOST !== '127.0.0.1' && HOST !== 'localhost';
   const nets = Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === 'IPv4' && !n.internal);
   console.log('');
   console.log('  贸智库 · 本地服务已启动');
   console.log('  ─────────────────────────────────────');
   console.log(`  本机访问    http://localhost:${PORT}`);
-  for (const n of nets) console.log(`  局域网访问  http://${n.address}:${PORT}`);
+  if (open) {
+    for (const n of nets) console.log(`  局域网访问  http://${n.address}:${PORT}`);
+    console.log('');
+    console.log('  ⚠ 已开放到局域网。此服务没有登录鉴权，同网络的人可以用你的模型额度。');
+  } else {
+    console.log('  仅本机可访问（默认）。需要用手机/别的电脑打开时：HOST=0.0.0.0 npm start');
+  }
   console.log('');
   console.log('  按 Ctrl+C 停止');
   console.log('');

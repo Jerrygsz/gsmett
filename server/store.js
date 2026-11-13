@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { seal, unseal, sealCfg, unsealCfg, isSealed } from './secrets.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, '..');
@@ -41,6 +42,7 @@ export function initStorage() {
   ensureDir(DATA_DIR);
   ensureDir(path.join(DATA_DIR, 'clients'));
   if (!fs.existsSync(CLIENTS_FILE)) writeJSON(CLIENTS_FILE, { seq: 2000, clients: [] });
+  try { migratePlainKeys(); } catch (e) { console.warn('[store] 明文 Key 迁移失败：', e.message); }
 }
 
 /* ---------------- 客户 ---------------- */
@@ -86,19 +88,36 @@ export function statePath(id) {
   return path.join(clientDir(id), 'state.json');
 }
 
+/* 客户 state 里的模型 Key 同样加密落盘。
+ * 只在读写边界处理，上层代码拿到的永远是明文，不用改。 */
+function sealState(st) {
+  if (!st?.cfg?.llm?.apiKey) return st;
+  return { ...st, cfg: { ...st.cfg, llm: { ...st.cfg.llm, apiKey: seal(st.cfg.llm.apiKey, DATA_DIR) } } };
+}
+
+function unsealState(st) {
+  if (!st?.cfg?.llm?.apiKey) return st;
+  const k = unseal(st.cfg.llm.apiKey, DATA_DIR);
+  if (k === null) {
+    console.warn('[store] 客户模型 Key 解不开（换过电脑或系统用户？），已停用，请重新填写');
+    return { ...st, cfg: { ...st.cfg, llm: { ...st.cfg.llm, apiKey: '' } } };
+  }
+  return { ...st, cfg: { ...st.cfg, llm: { ...st.cfg.llm, apiKey: k } } };
+}
+
 export function getState(id) {
-  return readJSON(statePath(id), null);
+  return unsealState(readJSON(statePath(id), null));
 }
 
 export function saveState(id, state) {
-  writeJSON(statePath(id), state);
+  writeJSON(statePath(id), sealState(state));
   return state;
 }
 
 export function patchState(id, patch) {
   const cur = getState(id) || {};
   const next = { ...cur, ...patch, updatedAt: new Date().toISOString() };
-  writeJSON(statePath(id), next);
+  writeJSON(statePath(id), sealState(next));
   return next;
 }
 
@@ -131,12 +150,40 @@ export function uploadDir(id) {
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 export function getConfig() {
-  return readJSON(CONFIG_FILE, { llm: null });
+  return unsealCfg(readJSON(CONFIG_FILE, { llm: null }), DATA_DIR);
 }
 
 export function saveConfig(cfg) {
-  writeJSON(CONFIG_FILE, cfg);
+  // 落盘前加密；文件被拷走也读不出 Key
+  writeJSON(CONFIG_FILE, sealCfg(cfg, DATA_DIR));
   return cfg;
 }
 
 export { readJSON, writeJSON };
+
+/**
+ * 一次性迁移：把历史上以明文保存的 Key 加密。
+ * 每次启动都跑，幂等——已经是密文的跳过。
+ * 这样你之前留下的 data/config.json 会被自动升级，不用手动处理。
+ */
+export function migratePlainKeys() {
+  let count = 0;
+
+  const raw = readJSON(CONFIG_FILE, null);
+  if (raw?.llm?.apiKey && !isSealed(raw.llm.apiKey)) {
+    writeJSON(CONFIG_FILE, sealCfg(raw, DATA_DIR));
+    count++;
+  }
+
+  for (const c of listClients()) {
+    const p = statePath(c.id);
+    const st = readJSON(p, null);
+    if (st?.cfg?.llm?.apiKey && !isSealed(st.cfg.llm.apiKey)) {
+      writeJSON(p, sealState(st));
+      count++;
+    }
+  }
+
+  if (count) console.log(`[store] 已将 ${count} 处明文 Key 加密存储`);
+  return count;
+}
