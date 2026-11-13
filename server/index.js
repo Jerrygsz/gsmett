@@ -856,6 +856,11 @@ async function route(req, res, url) {
     const b = await readJSONBody(req);
     const count = Math.min(30, Math.max(5, b.count || 15));
 
+    /* 出题也要按助手来。
+     * 以前这里写死「你是企业知识库测试出题人」，不管选哪个助手都出同一套通用题——
+     * 客户建了"售后政策助手"，测试题却全是产品参数，第 6 步的配置等于白配。 */
+    const asst = pickAssistant(st, b.assistantId);
+
     if (!cfg?.apiKey) {
       // 没有模型就出不了真实的测试题。硬凑"原句抽查"没有判定价值，直接说清楚。
       return sendJSON(res, 400, {
@@ -864,13 +869,35 @@ async function route(req, res, url) {
       });
     }
 
-    const sample = pickEvenly(idx.chunks, Math.min(12, idx.chunks.length))
+    /* 抽题范围跟着助手的资料范围走：售后助手只从售后资料里抽，
+     * 这样出的题才像这个岗位真会遇到的问题 */
+    let pool = idx.chunks;
+    if (asst?.scope?.length) {
+      const docs = getDocs(id);
+      const byId = Object.fromEntries(docs.map((d) => [d.id, docCat(d)]));
+      const byName = Object.fromEntries(docs.map((d) => [d.name, docCat(d)]));
+      const inScope = pool.filter((c) => asst.scope.includes(byId[c.docId] || byName[c.doc]));
+      if (!inScope.length) {
+        // 范围内没资料就不出题，别偷偷退回全量——那样出的题跟这个助手无关
+        return sendJSON(res, 400, {
+          error: `「${asst.name}」的资料范围是 ${asst.scope.join('、')}，但这几类下面还没有资料。先上传对应资料，或者把范围改成包含已有资料的分类。`,
+          emptyScope: true,
+        });
+      }
+      pool = inScope;
+    }
+
+    const sample = pickEvenly(pool, Math.min(12, pool.length))
       .map((c) => c.text.slice(0, 300))
       .join('\n---\n');
 
+    const asstBrief = asst
+      ? `本轮是为「${asst.name}」出题。这个岗位的定位是：${asst.role || '企业员工'}${asst.desc ? `，负责 ${asst.desc}` : ''}。问题要贴近这个岗位的人真实会开口问的，不要出泛泛的百科题。`
+      : '';
+
     try {
       const r = await LLM.chat(cfg, [
-        { role: 'system', content: '你是企业知识库测试出题人。' },
+        { role: 'system', content: '你是企业知识库测试出题人。' + (asstBrief ? '\n' + asstBrief : '') },
         {
           role: 'user',
           content: `根据下面的资料片段，出 ${count} 道企业员工真实会问的问题。\n要求：问题必须能且仅能用这些资料回答；覆盖不同资料；用中文；不要出现"根据资料"字样。\n只输出 JSON 数组，每项 {"q":"问题","expect":"答案要点","doc":"资料名"}。\n\n资料：\n${sample}`,

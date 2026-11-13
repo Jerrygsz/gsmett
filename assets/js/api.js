@@ -112,7 +112,7 @@
     chat(id, question, extra) { return this.post(`/api/clients/${id}/chat`, { question, ...(extra || {}) }, { timeout: 90000 }); },
 
     /* ---------- 测试 ---------- */
-    genTests(id, count) { return this.post(`/api/clients/${id}/tests/generate`, { count }); },
+    genTests(id, count, assistantId) { return this.post(`/api/clients/${id}/tests/generate`, { count, assistantId }); },
     getTests(id) { return this.get(`/api/clients/${id}/tests`); },
     runTests(id, limit, assistantId) { return this.post(`/api/clients/${id}/tests/run`, { limit, assistantId }, { timeout: 300000 }); },
     markTest(id, testId, verdict, note) { return this.post(`/api/clients/${id}/tests/mark`, { id: testId, verdict, note }); },

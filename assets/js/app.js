@@ -1812,12 +1812,12 @@
     return `
       ${(window.LIVE && window.LIVE.on && (window.LIVE.assistants || []).length) ? `
         <div class="row mb12" style="gap:9px;align-items:center;flex-wrap:wrap">
-          <span class="fs12 dim">用哪个助手跑：</span>
+          <span class="fs12 dim">用哪个助手：</span>
           <select class="select" id="testAsst" style="max-width:280px;height:32px;font-size:12px">
             <option value="">通用（查全部资料）</option>
             ${(window.LIVE.assistants || []).map((a) => `<option value="${esc(a.id)}" ${testAsstId === a.id ? 'selected' : ''}>${esc(a.name)}${a.scope && a.scope.length ? ` · ${esc(a.scope.join('/'))}` : ' · 全部'}</option>`).join('')}
           </select>
-          <span class="fs11 muted">换助手会改变回答口吻和能查到的资料范围${run.ran ? '，换完要重新运行' : ''}</span>
+          <span class="fs11 muted">出题和回答都按这个助手：岗位定位进提示词，资料范围决定它能查到什么${run.ran ? '。换完要重新运行' : ''}</span>
         </div>` : ''}
 
       <div id="testStatsWrap">${testStatsHTML()}</div>
@@ -1872,7 +1872,8 @@
       bg.disabled = true;
       bg.innerHTML = icon('refresh') + ' 模型正在读资料出题…';
       try {
-        const r = await window.LIVE.genTests(12);
+        // 出题也带上助手：题目会围绕这个岗位的职责和资料范围
+        const r = await window.LIVE.genTests(12, testAsstId);
         window.LIVE.paintTests();
         TM.save();
         renderStepPanel();
@@ -2717,6 +2718,7 @@
                 <span>${esc(a.desc || '未填写负责范围')}</span>
                 <span class="fs11 muted">查：${a.scope && a.scope.length ? esc(a.scope.join(' / ')) : '全部资料'} · ${esc(ruleChips(a))}</span>
               </div>
+              <button class="btn btn--quiet btn--sm" data-test-a="${esc(a.id)}">${icon('send')} 试问</button>
               <button class="btn btn--quiet btn--sm" data-edit-a="${esc(a.id)}">${icon('edit')} 编辑</button>
               <button class="btn btn--quiet btn--sm doc-item__del" data-del-a="${esc(a.id)}" title="删除">${icon('x')}</button>
             </div>`).join('')}
@@ -2735,6 +2737,60 @@
 
       <div class="note note--info mt12">${icon('info')}<span>助手的资料范围会真的作用到检索上：范围外的资料不会被检索到，问到范围外的问题它会直接说明。想让它查更全，把范围留空即可。</span></div>
     `;
+  }
+
+  /* 当场试一句：让客户自己验证"这个助手真的按我的设定在答"。
+   * 不试的话，提示词和资料范围改完只能靠信任。 */
+  function openAssistantTry(a) {
+    const m = modal({
+      title: `试问「${a.name}」`,
+      desc: '同一个问题换个助手问，回答会不一样——岗位定位进提示词，资料范围决定它能查什么。',
+      body: `
+        <div class="field">
+          <label class="field__label">问题</label>
+          <input class="input" id="tryQ" placeholder="例如：这个型号配几块电池？">
+        </div>
+        <div class="row" style="gap:8px">
+          <button class="btn btn--primary btn--sm" id="btnTryAsk">${icon('send')} 提问</button>
+          <span class="fs11 muted">会真的调用一次模型，消耗少量额度</span>
+        </div>
+        <div id="tryOut" class="mt14"></div>`,
+      okText: '关闭',
+      wide: true,
+    });
+
+    const back = m.root;
+    const inp = back.querySelector('#tryQ');
+    const btn = back.querySelector('#btnTryAsk');
+    const out = back.querySelector('#tryOut');
+
+    btn.onclick = async () => {
+      const q = inp.value.trim();
+      if (!q) return toast('先写一句问题', 'warn');
+      btn.disabled = true;
+      btn.innerHTML = icon('refresh') + ' 思考中…';
+      out.innerHTML = '';
+      try {
+        const r = await window.LIVE.ask(q, a.id);
+        if (r.error) throw new Error(r.error);
+        const cites = (r.citations || []).map((c) => `${c.doc}${c.page ? ' P.' + c.page : ''}`).join('、');
+        out.innerHTML = `
+          <div class="card" style="padding:14px;background:var(--surface-2);box-shadow:none">
+            <div class="row--between mb8">
+              <span class="fs11 muted">${esc(a.name)} 的回答</span>
+              ${r.ms ? `<span class="fs11 muted">${r.ms}ms</span>` : ''}
+            </div>
+            <div class="fs12" style="line-height:1.75;white-space:pre-wrap">${esc(r.answer || r.message || '（没有返回内容）')}</div>
+            ${cites ? `<div class="fs11 muted mt10">出处：${esc(cites)}</div>` : `<div class="fs11 muted mt10">没有引用任何资料</div>`}
+          </div>`;
+      } catch (e) {
+        out.innerHTML = `<div class="note note--warn">${esc(e.message)}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = icon('send') + ' 提问';
+      }
+    };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') btn.click(); };
   }
 
   function openAssistantEditor(step, existing, tpl) {
@@ -2859,6 +2915,13 @@
       b.onclick = () => {
         const a = (window.LIVE.assistants || []).find((x) => x.id === b.dataset.editA);
         if (a) openAssistantEditor(step, a, null);
+      };
+    });
+
+    qa('[data-test-a]').forEach((b) => {
+      b.onclick = () => {
+        const a = (window.LIVE.assistants || []).find((x) => x.id === b.dataset.testA);
+        if (a) openAssistantTry(a);
       };
     });
 

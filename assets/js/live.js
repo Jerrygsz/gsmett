@@ -294,8 +294,8 @@
 
     /* ---------------- 测试 ---------------- */
 
-    async genTests(count = 12) {
-      const r = await API.genTests(this.clientId, count);
+    async genTests(count = 12, assistantId) {
+      const r = await API.genTests(this.clientId, count, assistantId || undefined);
       if (r.error) throw new Error(r.error);
       this.tests = { items: r.tests || [], results: null };
       return r;
