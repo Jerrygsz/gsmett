@@ -159,7 +159,7 @@
     </nav>
 
     <div style="flex:1"></div>
-    <span class="badge" id="assistBadge" style="background:rgba(196,85,31,.18);color:#F0A97C">4 个协助请求</span>
+    <span class="badge" id="assistBadge" style="background:rgba(196,85,31,.18);color:#F0A97C">协助请求</span>
     <a href="app.html" class="btn btn--sm" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#fff">切回客户端</a>
     <div style="display:flex;align-items:center;gap:8px;padding-left:12px;border-left:1px solid rgba(255,255,255,.1)">
       <span class="avatar" style="width:28px;height:28px;font-size:11px;background:#1F4A52" id="adAvatar">周</span>
@@ -218,7 +218,7 @@
   <div class="grid g2 mt24" style="align-items:start;gap:18px">
     <div id="assist">
       <div class="section-head" style="margin-top:0">
-        <h3>人工协助请求</h3><span id="assistHint">4 个待处理</span>
+        <h3>人工协助请求</h3><span id="assistHint">—</span>
       </div>
       <div id="assistList"></div>
     </div>
@@ -650,7 +650,8 @@
   };
 
   /* 协助请求 */
-  qi('#assistList').innerHTML = ASSIST_REQ.map((a, i) => `
+  qi('#assistList').innerHTML = ASSIST_REQ.length
+    ? ASSIST_REQ.map((a, i) => `
     <div class="assist-item">
       <span class="assist-item__pri ${a.pri === 'high' ? 'assist-item__pri--high' : ''}"></span>
       <div style="flex:1;min-width:0">
@@ -664,10 +665,13 @@
           <button class="btn btn--ghost btn--sm" data-reply="${i}">处理</button>
         </div>
       </div>
-    </div>`).join('');
+    </div>`).join('')
+    : `<div class="empty" style="padding:26px 0;text-align:center;color:var(--text-3);font-size:12.5px">
+         暂无协助请求。客户在项目里点「申请人工协助」后会出现在这里。
+       </div>`;
 
-  qi('#assistHint').textContent = `${ASSIST_REQ.length} 个待处理`;
-  qi('#assistBadge').textContent = `${ASSIST_REQ.length} 个协助请求`;
+  qi('#assistHint').textContent = ASSIST_REQ.length ? `${ASSIST_REQ.length} 个待处理` : '暂无';
+  qi('#assistBadge').textContent = ASSIST_REQ.length ? `${ASSIST_REQ.length} 个协助请求` : '无协助请求';
 
   function handleAssist(i) {
     const a = ASSIST_REQ[i];
@@ -685,7 +689,8 @@
   }
 
   /* 我的任务 */
-  qi('#taskList').innerHTML = TASKS_MINE.map(t => `
+  qi('#taskList').innerHTML = TASKS_MINE.length
+    ? TASKS_MINE.map(t => `
     <div class="todo-item" style="${t.done ? 'opacity:.5' : ''}">
       <span class="todo-item__ico" style="background:${t.done ? 'var(--success-bg)' : 'var(--surface-3)'};color:${t.done ? 'var(--success)' : 'var(--text-3)'}">
         ${icon(t.done ? 'check' : 'clock')}
@@ -694,7 +699,8 @@
         <b style="${t.done ? 'text-decoration:line-through' : ''}">${esc(t.txt)}</b>
         <span>${esc(t.who)} · ${esc(t.due)}</span>
       </div>
-    </div>`).join('');
+    </div>`).join('')
+    : `<div style="padding:24px 0;text-align:center;color:var(--text-3);font-size:12.5px">暂无待办。新建客户后，待办会随项目进度自动生成。</div>`;
 
   qi('#btnExport').onclick = () => toast('周报已生成，包含项目进度与协助响应时长');
   qi('#btnFilter').onclick = () => toast('演示环境：筛选未接入', 'info');

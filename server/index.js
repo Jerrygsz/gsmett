@@ -21,7 +21,7 @@ import * as LLM from './llm.js';
 import {
   ROOT, initStorage, listClients, getClient, saveClient, nextProjectNo, deleteClient,
   getState, saveState, patchState, getDocs, saveDocs, getIndex, saveIndex,
-  uploadDir, clientDir,
+  uploadDir, clientDir, getConfig, saveConfig,
 } from './store.js';
 
 const PORT = Number(process.env.PORT || 8787);
@@ -145,6 +145,7 @@ function defaultState(client) {
     cfg: {
       llm: null, // { provider, baseURL, model, apiKey } 只存在服务端
     },
+    assistants: [], // 第 6 步创建，第 7/8 步按它决定口吻和检索范围
     portalAsks: 0,
     portalMiss: 0,
     feedback: [],
@@ -174,6 +175,51 @@ function maskKey(k) {
   if (!k) return '';
   if (k.length <= 10) return '••••';
   return k.slice(0, 6) + '••••' + k.slice(-4);
+}
+
+/* ---------------- 模型配置解析 ----------------
+ * 两层：客户自己填的 Key 优先；没填就用平台内置的（管理员在 data/config.json 里配一次，
+ * 所有客户共用，方便先跑通）。浏览器的任何请求都不会拿到明文 Key。
+ */
+function platformLLM() {
+  const l = getConfig().llm;
+  return l && l.apiKey ? l : null;
+}
+
+function effectiveLLM(st) {
+  const own = st?.cfg?.llm;
+  if (own && own.apiKey) return { ...own, source: 'client' };
+  const p = platformLLM();
+  return p ? { ...p, source: 'platform' } : null;
+}
+
+/* 资料分类：老数据没存 cat，按文件名推断，规则和前端保持一致 */
+function guessCat(name) {
+  const n = name || '';
+  if (/售后|退换|保修|维修|投诉/.test(n)) return '售后资料';
+  if (/SOP|流程|规范|制度/.test(n)) return '业务流程';
+  if (/报价|价格|条款|合同|账期|付款|折扣/.test(n)) return '销售资料';
+  if (/FAQ|常见问题|话术|销售/.test(n)) return '销售资料';
+  return '产品资料';
+}
+
+const docCat = (d) => d.cat || guessCat(d.name);
+
+/* 按助手的资料范围过滤检索结果。scope 为空 = 不限制 */
+function filterByScope(hits, assistant, docs) {
+  if (!assistant?.scope?.length) return hits;
+  const byId = Object.fromEntries(docs.map((d) => [d.id, docCat(d)]));
+  const byName = Object.fromEntries(docs.map((d) => [d.name, docCat(d)]));
+  return hits.filter((h) => {
+    const cat = byId[h.chunk.docId] || byName[h.chunk.doc];
+    return assistant.scope.includes(cat);
+  });
+}
+
+/* 只有明确指定了助手才用助手；不传 = 通用模式，查全部资料 */
+function pickAssistant(st, assistantId) {
+  if (!assistantId) return null;
+  return (st.assistants || []).find((a) => a.id === assistantId && a.enabled !== false) || null;
 }
 
 /* ---------------- 上传 ---------------- */
@@ -268,7 +314,11 @@ async function route(req, res, url) {
 
   /* --- 基础 --- */
   if (p === '/api/health' && method === 'GET') {
-    return sendJSON(res, 200, { ok: true, service: 'maozhiku-local', node: process.version, port: PORT });
+    const l = platformLLM();
+    return sendJSON(res, 200, {
+      ok: true, service: 'maozhiku-local', node: process.version, port: PORT,
+      llm: l ? { ready: true, provider: l.provider, model: l.model } : { ready: false },
+    });
   }
 
   if (p === '/api/env' && method === 'GET') {
@@ -282,7 +332,27 @@ async function route(req, res, url) {
 
   /* --- 客户 --- */
   if (p === '/api/clients' && method === 'GET') {
-    return sendJSON(res, 200, { clients: listClients() });
+    // 列表要带上真实进度，否则后台永远显示「待启动 0%」，客户做完了也看不出来
+    const clients = listClients().map((c) => {
+      const st = getState(c.id);
+      const steps = st?.project?.steps || {};
+      const done = Object.values(steps).filter((s) => s && s.done).length;
+      const total = 10;
+      const pct = Math.round((done / total) * 100);
+      const hasReport = !!st?.project?.report;
+      const stage = pct >= 100 ? '维护期' : hasReport ? '验收中' : pct > 0 ? '实施中' : '待启动';
+      return {
+        ...c,
+        pct,
+        doneSteps: done,
+        totalSteps: total,
+        stage,
+        docs: getDocs(c.id).length,
+        asks: st?.portalAsks || 0,
+        feedback: (st?.feedback || []).length,
+      };
+    });
+    return sendJSON(res, 200, { clients });
   }
 
   if (p === '/api/clients' && method === 'POST') {
@@ -339,8 +409,21 @@ async function route(req, res, url) {
   /* --- 资料 --- */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs$/)) && method === 'GET') {
     requireClient(m[1]);
-    const docs = getDocs(m[1]).map((d) => ({ ...d, textPath: undefined }));
+    const docs = getDocs(m[1]).map((d) => ({ ...d, cat: docCat(d), textPath: undefined }));
     return sendJSON(res, 200, { docs });
+  }
+
+  /* 改资料分类：分类直接决定哪些助手能查到它，得让人能纠正 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs\/([\w]+)$/)) && method === 'PATCH') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const docs = getDocs(id);
+    const d = docs.find((x) => x.id === m[2]);
+    if (!d) return sendJSON(res, 404, { error: '资料不存在' });
+    d.cat = String(b.cat || '').trim() || docCat(d);
+    saveDocs(id, docs);
+    return sendJSON(res, 200, { ok: true, docs: docs.map((x) => ({ ...x, cat: docCat(x), textPath: undefined })) });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs$/)) && method === 'POST') {
@@ -464,19 +547,126 @@ async function route(req, res, url) {
     });
   }
 
+  /* --- 平台内置模型配置（管理员用，Key 只在服务端） --- */
+  if (p === '/api/platform/llm' && method === 'GET') {
+    const l = platformLLM();
+    return sendJSON(res, 200, l
+      ? { available: true, provider: l.provider, baseURL: l.baseURL, model: l.model, keyMasked: maskKey(l.apiKey) }
+      : { available: false });
+  }
+
+  if (p === '/api/platform/llm' && method === 'POST') {
+    const b = await readJSONBody(req);
+    const cur = platformLLM() || {};
+    const cfg = {
+      provider: b.provider || cur.provider || 'deepseek',
+      baseURL: (b.baseURL || cur.baseURL || 'https://api.deepseek.com').replace(/\/+$/, ''),
+      model: b.model || cur.model || 'deepseek-chat',
+      apiKey: (b.apiKey || '').trim() || cur.apiKey || '',
+    };
+    if (!cfg.apiKey) return sendJSON(res, 400, { ok: false, error: '请填入 API Key' });
+
+    let test;
+    try {
+      test = await LLM.testConnection(cfg);
+    } catch (e) {
+      return sendJSON(res, 200, { ok: false, error: e.message, code: e.code || 'ERROR' });
+    }
+
+    const c = getConfig();
+    c.llm = cfg;
+    saveConfig(c);
+    return sendJSON(res, 200, {
+      ok: true,
+      test,
+      config: { provider: cfg.provider, baseURL: cfg.baseURL, model: cfg.model, keyMasked: maskKey(cfg.apiKey) },
+    });
+  }
+
+  /* --- AI 助手：第 6 步创建，第 7/8 步真正参与回答 --- */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/assistants$/)) && method === 'GET') {
+    const st = ensureState(m[1]);
+    return sendJSON(res, 200, { assistants: st.assistants || [] });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/assistants$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const st = ensureState(id);
+    st.assistants = st.assistants || [];
+
+    const now = new Date().toISOString();
+    const a = {
+      id: b.id || 'a_' + crypto.randomBytes(3).toString('hex'),
+      name: (b.name || '').trim() || '未命名助手',
+      role: (b.role || '').trim(),
+      desc: (b.desc || '').trim(),
+      scope: Array.isArray(b.scope) ? b.scope.filter(Boolean) : [],
+      prompt: (b.prompt || '').trim(),
+      tone: (b.tone || '').trim(),
+      rules: {
+        cite: b.rules?.cite !== false,
+        refuse: b.rules?.refuse !== false,
+        brevity: b.rules?.brevity !== false,
+        noPrice: !!b.rules?.noPrice,
+      },
+      enabled: b.enabled !== false,
+      updatedAt: now,
+    };
+
+    const i = st.assistants.findIndex((x) => x.id === a.id);
+    if (i >= 0) {
+      a.createdAt = st.assistants[i].createdAt || now;
+      st.assistants[i] = a;
+    } else {
+      a.createdAt = now;
+      // 按创建顺序追加，别把新助手插到最前面——门户默认用第一个，插队会让人一进来就撞上错的助手
+      st.assistants.push(a);
+    }
+
+    st.activity = st.activity || [];
+    st.activity.unshift({
+      t: new Date().toISOString().slice(5, 16).replace('T', ' '),
+      txt: `${i >= 0 ? '更新' : '创建'} AI 助手「${a.name}」${a.scope.length ? ` · 限定 ${a.scope.join('/')}` : ''}`,
+      who: '系统',
+    });
+    saveState(id, st);
+
+    return sendJSON(res, 200, { ok: true, assistant: a, assistants: st.assistants });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/assistants\/([\w]+)$/)) && method === 'DELETE') {
+    const id = m[1];
+    requireClient(id);
+    const st = ensureState(id);
+    const before = (st.assistants || []).length;
+    st.assistants = (st.assistants || []).filter((a) => a.id !== m[2]);
+    if (st.assistants.length === before) return sendJSON(res, 404, { error: '助手不存在' });
+    saveState(id, st);
+    return sendJSON(res, 200, { ok: true, assistants: st.assistants });
+  }
+
   /* --- 模型配置 --- */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/llm$/)) && method === 'GET') {
     const id = m[1];
     requireClient(id);
     const st = ensureState(id);
-    const cfg = st.cfg?.llm;
-    return sendJSON(res, 200, cfg ? {
-      configured: true,
-      provider: cfg.provider,
-      baseURL: cfg.baseURL,
-      model: cfg.model,
-      keyMasked: maskKey(cfg.apiKey),
-    } : { configured: false });
+    const own = st.cfg?.llm;
+    const plat = platformLLM();
+    const eff = effectiveLLM(st);
+    return sendJSON(res, 200, {
+      configured: !!eff,
+      provider: eff?.provider || null,
+      baseURL: eff?.baseURL || null,
+      model: eff?.model || null,
+      keyMasked: maskKey(eff?.apiKey),
+      source: eff?.source || null,          // client = 客户自己的 Key，platform = 平台内置
+      own: own ? { provider: own.provider, model: own.model, keyMasked: maskKey(own.apiKey) } : null,
+      platform: plat
+        ? { available: true, provider: plat.provider, model: plat.model, keyMasked: maskKey(plat.apiKey) }
+        : { available: false },
+    });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/llm$/)) && method === 'POST') {
@@ -526,11 +716,11 @@ async function route(req, res, url) {
     const id = m[1];
     requireClient(id);
     const st = ensureState(id);
-    const cfg = st.cfg?.llm;
+    const cfg = effectiveLLM(st);
     if (!cfg?.apiKey) return sendJSON(res, 400, { ok: false, error: '还没有配置 API Key' });
     try {
       const test = await LLM.testConnection(cfg);
-      return sendJSON(res, 200, { ok: true, test });
+      return sendJSON(res, 200, { ok: true, test, source: cfg.source });
     } catch (e) {
       return sendJSON(res, 200, { ok: false, error: e.message, code: e.code });
     }
@@ -548,23 +738,32 @@ async function route(req, res, url) {
     const idx = getIndex(id);
     if (!idx) return sendJSON(res, 400, { error: '知识库尚未构建' });
 
-    const hits = search(idx.index, idx.chunks, q, b.topK || 5);
+    // 助手决定"以谁的口吻、查哪些资料"——这是第 6 步配置真正生效的地方
+    const asst = pickAssistant(st, b.assistantId);
+    const topK = b.topK || 5;
+    // 限定了范围就多取一些候选，过滤完再截断，避免过滤后不够用
+    let hits = search(idx.index, idx.chunks, q, asst?.scope?.length ? topK * 4 : topK);
+    if (asst?.scope?.length) hits = filterByScope(hits, asst, getDocs(id)).slice(0, topK);
 
     // 没检索到就直接告知，不浪费模型调用
     if (!hits.length) {
       st.portalAsks = (st.portalAsks || 0) + 1;
       st.portalMiss = (st.portalMiss || 0) + 1;
       saveState(id, st);
+      const scoped = asst?.scope?.length
+        ? `「${asst.name}」只查 ${asst.scope.join('、')} 这几类资料，这个问题可能落在它的范围外。`
+        : '这个问题涉及的资料还没有上传，或者换一种说法再试试。';
       return sendJSON(res, 200, {
-        answer: '知识库里没有找到相关内容。这个问题涉及的资料还没有上传，或者换一种说法再试试。',
+        answer: `知识库里没有找到相关内容。${scoped}`,
         citations: [],
         gap: true,
         hits: 0,
+        assistant: asst ? { id: asst.id, name: asst.name } : null,
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     }
 
-    const cfg = st.cfg?.llm;
+    const cfg = effectiveLLM(st);
     if (!cfg?.apiKey) {
       // 没配模型：只给检索结果，不编回答
       st.portalAsks = (st.portalAsks || 0) + 1;
@@ -581,7 +780,7 @@ async function route(req, res, url) {
     }
 
     try {
-      const r = await LLM.answerWithRag(cfg, { question: q, hits, assistant: b.assistant });
+      const r = await LLM.answerWithRag(cfg, { question: q, hits, assistant: asst });
       st.portalAsks = (st.portalAsks || 0) + 1;
       if (r.gap) st.portalMiss = (st.portalMiss || 0) + 1;
       saveState(id, st);
@@ -593,6 +792,7 @@ async function route(req, res, url) {
         usage: r.usage,
         ms: r.ms,
         model: r.model,
+        assistant: asst ? { id: asst.id, name: asst.name, scope: asst.scope } : null,
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     } catch (e) {
@@ -609,7 +809,7 @@ async function route(req, res, url) {
     if (!idx || !idx.chunks.length) return sendJSON(res, 400, { error: '知识库尚未构建' });
 
     // 从真实切片里抽题：让模型基于片段出题，答案必须能在片段里找到
-    const cfg = st.cfg?.llm;
+    const cfg = effectiveLLM(st);
     const b = await readJSONBody(req);
     const count = Math.min(30, Math.max(5, b.count || 15));
 
@@ -674,13 +874,17 @@ async function route(req, res, url) {
     if (!idx) return sendJSON(res, 400, { error: '知识库尚未构建' });
     if (!st.tests?.items?.length) return sendJSON(res, 400, { error: '还没有测试题' });
 
-    const cfg = st.cfg?.llm;
+    const cfg = effectiveLLM(st);
     const limit = Math.min(30, b.limit || st.tests.items.length);
     const results = [];
+    // 用哪个助手跑测试，就按谁的资料范围和口吻回答
+    const asst = pickAssistant(st, b.assistantId);
+    const docsForScope = getDocs(id);
 
     for (let i = 0; i < Math.min(limit, st.tests.items.length); i++) {
       const t = st.tests.items[i];
-      const hits = search(idx.index, idx.chunks, t.q, 4);
+      let hits = search(idx.index, idx.chunks, t.q, asst?.scope?.length ? 16 : 4);
+      if (asst?.scope?.length) hits = filterByScope(hits, asst, docsForScope).slice(0, 4);
 
       if (!hits.length) {
         results.push({ ...t, answer: null, citations: [], verdict: 'gap', reason: '没有检索到任何相关片段' });
@@ -699,7 +903,7 @@ async function route(req, res, url) {
       }
 
       try {
-        const r = await LLM.answerWithRag(cfg, { question: t.q, hits });
+        const r = await LLM.answerWithRag(cfg, { question: t.q, hits, assistant: asst });
         results.push({
           ...t,
           answer: r.answer,

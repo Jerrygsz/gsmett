@@ -150,12 +150,35 @@ export function buildRagMessages(question, hits, assistant = {}) {
         .join('\n\n---\n\n')
     : '（没有检索到任何相关资料）';
 
-  const role = assistant.prompt ? `\n\n当前岗位要求：${assistant.prompt}` : '';
-
   return [
-    { role: 'system', content: SYSTEM + role },
+    { role: 'system', content: SYSTEM + assistantBlock(assistant) },
     { role: 'user', content: `【资料】\n${ctx}\n\n【问题】\n${question}` },
   ];
+}
+
+/**
+ * 把第 6 步创建的助手配置翻译成模型能听懂的设定。
+ * 没有助手时返回空串，行为和以前完全一致。
+ */
+export function assistantBlock(a) {
+  if (!a || (!a.name && !a.role && !a.prompt && !a.desc)) return '';
+  const L = [];
+  if (a.name) L.push(`你的身份：${a.name}`);
+  if (a.role) L.push(`岗位定位：${a.role}`);
+  if (a.desc) L.push(`负责范围：${a.desc}`);
+
+  const rules = [];
+  if (a.rules?.cite !== false) rules.push('回答要能对上具体资料，正文不用自己标序号，出处由系统附上');
+  if (a.rules?.refuse !== false) rules.push('资料里查不到就直接说不知道，不要用常识补齐');
+  if (a.rules?.noPrice) rules.push('价格、折扣、账期只能引用资料原文，资料没写就说不确定');
+  if (a.rules?.brevity !== false) rules.push('先用一句话给结论，需要时再补细节');
+  if (rules.length) L.push('回答规则：\n' + rules.map((r, i) => `  ${i + 1}. ${r}`).join('\n'));
+
+  if (a.scope?.length) L.push(`你只能依据这些资料分类回答：${a.scope.join('、')}。问到范围外的内容，说明该问题不属于你的范围`);
+  if (a.tone) L.push(`语气：${a.tone}`);
+  if (a.prompt) L.push(`补充要求：${a.prompt}`);
+
+  return '\n\n【当前助手设定】\n' + L.join('\n');
 }
 
 /** 带检索的问答：返回回答 + 真实出处 */

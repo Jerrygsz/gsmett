@@ -23,11 +23,12 @@ if not exist "node_modules" (
   echo.
 )
 
-echo   正在启动，启动后浏览器会自动打开
-echo   关闭这个窗口就停止服务
+echo   正在启动，服务起来后浏览器会自动打开
+echo   关掉这个窗口 = 停止服务
 echo.
 
-start "" http://localhost:8787/
+rem 延时 2 秒再开浏览器，避免服务还没监听就打空
+start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep 2; Start-Process 'http://localhost:8787/'"
 
 node server/index.js
 

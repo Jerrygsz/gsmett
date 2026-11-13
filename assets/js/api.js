@@ -91,6 +91,7 @@
       return this.post(`/api/clients/${id}/docs`, fd);
     },
     deleteDoc(id, docId) { return this.del(`/api/clients/${id}/docs/${docId}`); },
+    setDocCat(id, docId, cat) { return this.patch(`/api/clients/${id}/docs/${docId}`, { cat }); },
 
     /* ---------- 知识库 ---------- */
     buildKb(id) { return this.post(`/api/clients/${id}/kb/build`, {}); },
@@ -102,13 +103,18 @@
     saveLlm(id, cfg) { return this.post(`/api/clients/${id}/llm`, cfg); },
     testLlm(id) { return this.post(`/api/clients/${id}/llm/test`, {}); },
 
+    /* ---------- AI 助手 ---------- */
+    assistants(id) { return this.get(`/api/clients/${id}/assistants`); },
+    saveAssistant(id, a) { return this.post(`/api/clients/${id}/assistants`, a); },
+    deleteAssistant(id, aid) { return this.del(`/api/clients/${id}/assistants/${aid}`); },
+
     /* ---------- 问答 ---------- */
     chat(id, question, extra) { return this.post(`/api/clients/${id}/chat`, { question, ...(extra || {}) }, { timeout: 90000 }); },
 
     /* ---------- 测试 ---------- */
     genTests(id, count) { return this.post(`/api/clients/${id}/tests/generate`, { count }); },
     getTests(id) { return this.get(`/api/clients/${id}/tests`); },
-    runTests(id, limit) { return this.post(`/api/clients/${id}/tests/run`, { limit }, { timeout: 300000 }); },
+    runTests(id, limit, assistantId) { return this.post(`/api/clients/${id}/tests/run`, { limit, assistantId }, { timeout: 300000 }); },
     markTest(id, testId, verdict, note) { return this.post(`/api/clients/${id}/tests/mark`, { id: testId, verdict, note }); },
     report(id) { return this.get(`/api/clients/${id}/tests/report`); },
   };

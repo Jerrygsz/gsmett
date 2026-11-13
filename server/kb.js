@@ -155,15 +155,69 @@ export function buildIndex(chunks) {
 const K1 = 1.4;
 const B = 0.72;
 
+/**
+ * 业务同义词组。
+ * BM25 是字面匹配：资料里写「MOQ」，员工问「起订量」就搜不到——这在真实走查里一定会发生。
+ * 这里维护一份外贸/制造场景的高频黑话对照，查询命中任一词就把同组词按低权重一起检索，
+ * 只补召回、不改排序主导权（扩展词权重 0.55，原始词仍是 1.0）。
+ */
+const SYNONYM_GROUPS = [
+  ['moq', '最小起订量', '起订量', '最小订购量', '最低起订量', '最少订多少'],
+  ['交期', '交货期', '交货时间', '生产周期', 'leadtime'],
+  ['质保', '保修', '保修期', '保质期', 'warranty'],
+  ['报价', '价格', '单价', '多少钱', '售价'],
+  ['折扣', '优惠', '让利', 'discount'],
+  ['规格', '参数', '型号', '规格书'],
+  ['包装', '装箱', '外箱', '包装方式'],
+  ['毛重', '净重', '重量'],
+  ['付款', '支付', '结算', '定金', '尾款'],
+  ['认证', '证书', '资质', 'rohs'],
+  ['售后', '退换', '退货', '维修', '返修'],
+  ['库存', '现货', '备货', '有没有货'],
+  ['电池', '锂电', '电芯'],
+  ['钻头', '钻咀'],
+];
+
+/* word(小写) → 所属组下标，启动时算一次 */
+const SYN_LOOKUP = new Map();
+SYNONYM_GROUPS.forEach((group, gi) => {
+  for (const w of group) SYN_LOOKUP.set(w.toLowerCase(), gi);
+});
+
+/** 从查询里找出命中的同义组，返回该组其余词的 token（已去重） */
+function expandQuery(query) {
+  const q = (query || '').toLowerCase();
+  const extra = new Set();
+  const seenGroups = new Set();
+
+  for (const [word, gi] of SYN_LOOKUP) {
+    if (!q.includes(word)) continue;
+    if (seenGroups.has(gi)) continue;
+    seenGroups.add(gi);
+    for (const w of SYNONYM_GROUPS[gi]) {
+      if (q.includes(w.toLowerCase())) continue; // 查询里本来就有，不用再扩
+      for (const tk of tokenize(w)) extra.add(tk);
+    }
+  }
+  return [...extra];
+}
+
 export function search(index, chunks, query, topK = 6) {
   if (!index || !chunks?.length) return [];
   const qToks = tokenize(query);
   if (!qToks.length) return [];
 
+  // 原始词权重 1.0，同义扩展词 0.55；同一个 token 取最高权重，避免重复加分
+  const weight = new Map();
+  for (const tk of qToks) weight.set(tk, 1);
+  for (const tk of expandQuery(query)) {
+    if (!weight.has(tk)) weight.set(tk, 0.55);
+  }
+
   const scores = new Map();
   const { postings, lengths, avgdl, n } = index;
 
-  for (const tk of qToks) {
+  for (const [tk, w] of weight) {
     const m = postings[tk];
     if (!m) continue;
     const df = Object.keys(m).length;
@@ -172,7 +226,7 @@ export function search(index, chunks, query, topK = 6) {
     for (const [idxStr, tf] of Object.entries(m)) {
       const idx = +idxStr;
       const dl = lengths[idx] || 1;
-      const s = idf * ((tf * (K1 + 1)) / (tf + K1 * (1 - B + B * (dl / avgdl))));
+      const s = w * idf * ((tf * (K1 + 1)) / (tf + K1 * (1 - B + B * (dl / avgdl))));
       scores.set(idx, (scores.get(idx) || 0) + s);
     }
   }

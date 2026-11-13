@@ -54,6 +54,14 @@
     const p = TM.progress();
     qi('#navProg').textContent = p.pct + '%';
     qi('#orgShort').textContent = S.org.short || S.org.name.slice(0, 8);
+    const orgAv = qi('#orgAvatar');
+    if (orgAv) orgAv.textContent = (S.org.short || S.org.name || '企').slice(0, 1);
+    // 侧栏副标题以前写死「标准交付 · 30 人」，真实客户看着莫名其妙，改成按实际数据
+    const orgSub = qi('#orgSub');
+    if (orgSub) {
+      const n = (S.members || []).length;
+      orgSub.textContent = `${S.org.plan || '标准交付'}${n ? ` · ${n} 人` : ''}`;
+    }
     qi('#userName').textContent = S.user.name;
     qi('#userAvatar').textContent = S.user.initial;
   }
@@ -477,7 +485,11 @@
     // 进入步骤前先按当前数据校正检查项，避免显示与实际不一致
     if (st !== 'locked') {
       if (step.id === 1) syncOrgChecks(step);
+      if (step.id === 6) syncStep6Checks(step);
+      if (step.id === 7) syncStep7Checks(step);
       if (step.id === 8) syncStep8Checks(step);
+      if (step.id === 9) syncStep9Checks(step);
+      if (step.id === 10) syncStep10Checks(step);
     }
 
     const saved = TM.stepState(step.id);
@@ -576,7 +588,11 @@
                 </button>
               </div>
               <div class="console" id="console" style="display:${saved.executed ? 'block' : 'none'}">
-                ${saved.executed ? buildLogs(step).map(l => `<div><span class="ts">${'10:2' + Math.floor(Math.random() * 9)}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}</span><span class="${l[0]}">${esc(l[1])}</span></div>`).join('') : ''}
+                ${saved.executed
+                  ? (saved.llmLog
+                      ? saved.llmLog.map(l => `<div><span class="ts">${esc(l[2] || '')}</span><span class="${l[0]}">${esc(l[1])}</span></div>`).join('')
+                      : buildLogs(step).map(l => `<div><span class="ts">${'10:2' + Math.floor(Math.random() * 9)}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}</span><span class="${l[0]}">${esc(l[1])}</span></div>`).join(''))
+                  : ''}
               </div>
               ${!saved.executed && st !== 'locked' ? `<div class="fs11 muted mt8">执行前请确认：这一步只读取你在本步骤中提供的内容，不会访问其他文件。</div>` : ''}
             </div>
@@ -588,6 +604,14 @@
           <div class="step-block">
             <div class="step-block__label">模型配置</div>
             ${st === 'locked' ? `<div class="note note--warn">${icon('lock')}<span>完成前面的步骤后才能配置模型。</span></div>` : llmForm(true)}
+          </div>` : ''}
+
+          ${step.id === 6 ? `
+          <div class="step-block">
+            <div class="step-block__label">AI 助手</div>
+            ${st === 'locked'
+              ? `<div class="note note--warn">${icon('lock')}<span>完成第 5 步「AI 模型配置」后才能创建助手。</span></div>`
+              : assistantPanel(step)}
           </div>` : ''}
 
           <div class="step-block">
@@ -684,6 +708,9 @@
     const be = qi('#btnExec');
     if (be) be.onclick = () => {
       if (step.id === 2) return (window.LIVE && window.LIVE.on) ? runEnvCheckLive(step, be) : runEnvCheck(step, be);
+      if (step.id === 5 && window.LIVE && window.LIVE.on) return runLlmTest(step, be);
+      if (step.id === 9 && window.LIVE && window.LIVE.on) return runAcceptance(step, be);
+      if (step.id === 10 && window.LIVE && window.LIVE.on) return runHandover(step, be);
       return runExec(step, be);
     };
 
@@ -704,6 +731,8 @@
     if (step.id === 7) bindTestBench(step);
     // 第 5 步：模型配置
     if (step.id === 5) bindLlmForm();
+    // 第 6 步：AI 助手
+    if (step.id === 6) bindAssistantPanel(step);
     // 第 8 步：员工邀请与反馈
     if (step.id === 8) bindInviteBox(step);
   }
@@ -936,9 +965,209 @@
     }
   }
 
+  /* 第 5 步 · 模型连通性：真发一次请求，日志全部来自真实返回，不预写结果 */
+  async function runLlmTest(step, btn) {
+    if (TM.stepStatus(step.id) === 'locked') {
+      toast('先完成上一步再测试', 'warn');
+      return;
+    }
+    const con = qi('#console');
+    btn.disabled = true;
+    btn.innerHTML = icon('refresh') + ' 正在请求…';
+    if (con) { con.style.display = 'block'; con.innerHTML = ''; }
+
+    const rows = [];
+    const line = (type, text) => {
+      const t = TM.fmtTime(new Date());
+      rows.push([type, text, t]);
+      if (!con) return;
+      const d = TM.el('div', '', `<span class="ts">${t}</span><span class="${type}">${esc(text)}</span>`);
+      con.appendChild(d);
+      con.scrollTop = con.scrollHeight;
+    };
+
+    const cfg = (window.LIVE && window.LIVE.llm) || {};
+    line('dim', `当前配置：${cfg.provider || '-'} / ${cfg.model || '-'} / ${cfg.keyMasked || '-'}${cfg.source === 'platform' ? '（平台内置）' : ''}`);
+
+    try {
+      const r = await window.LIVE.testLlm();
+      const t = r.test || {};
+      line('ok', `密钥校验通过 · 实际模型 ${t.model || cfg.model || '-'}`);
+      line('ok', `模型回复「${(t.reply || '正常').slice(0, 20)}」`);
+      line('ok', `往返 ${t.ms} ms · 消耗 ${t.usage?.total ?? 0} tokens`);
+      line('dim', '数据策略：仅发送检索片段与问题，不发送原始文件');
+
+      const saved = TM.stepState(step.id);
+      saved.executed = true;
+      saved.llmLog = rows;
+      setCheck(step, 'c1', true);
+      setCheck(step, 'c2', true);
+      TM.save();
+      refreshGate(step, saved);
+
+      btn.disabled = false;
+      btn.innerHTML = icon('check') + ' 已执行';
+      logAct(`模型连通性测试通过 · ${t.model || cfg.model}`, '系统');
+      toast('连通正常，模型可用');
+    } catch (e) {
+      line('warn', '连通失败：' + e.message);
+      const saved = TM.stepState(step.id);
+      saved.llmLog = rows;
+      TM.save();
+      btn.disabled = false;
+      btn.innerHTML = icon('play') + ' 重新测试';
+      toast('连通失败：' + e.message, 'warn');
+    }
+  }
+
+  /* 第 9 步 · 验收报告：每个数字都来自本项目，不预写「86%」「5 项待整改」 */
+  async function runAcceptance(step, btn) {
+    const con = qi('#console');
+    const saved = TM.stepState(step.id);
+    btn.disabled = true;
+    btn.innerHTML = icon('refresh') + ' 正在汇总…';
+    if (con) { con.style.display = 'block'; con.innerHTML = ''; }
+
+    const rows = [];
+    const say = (cls, text) => {
+      const t = TM.fmtTime(new Date());
+      rows.push([cls, text, t]);
+      if (!con) return;
+      const d = TM.el('div', '', `<span class="ts">${t}</span><span class="${cls}">${esc(text)}</span>`);
+      con.appendChild(d);
+      con.scrollTop = con.scrollHeight;
+    };
+
+    const s = testStats();
+    const members = S.members || [];
+    const roles = [...new Set(members.map((m) => m.role).filter(Boolean))];
+    const doneSteps = STEPS.filter((x) => TM.stepState(x.id).done).length;
+    const docs = (S.project.files || []).length;
+
+    say('ok', `汇总 ${doneSteps} 个已完成步骤`);
+    await sleep(240);
+    say('ok', `资料 ${docs} 份 · 成员 ${members.length} 人 · ${roles.length} 种角色`);
+    await sleep(240);
+    say(
+      s.pending ? 'warn' : s.rate >= 85 ? 'ok' : 'warn',
+      s.judged
+        ? `测试 ${s.total} 题 · 已判定 ${s.judged} 道 · 通过率 ${s.rate}%（通过 ${s.pass} / 需改 ${s.fix} / 不足 ${s.gap}）`
+        : '测试还没有判定结果'
+    );
+    await sleep(240);
+    say(s.fix ? 'warn' : 'ok', s.fix ? `需整改 ${s.fix} 项，需记录处理期限` : '无需整改项');
+    await sleep(220);
+    say('dim', '验收报告已生成，等待双方确认');
+
+    S.project.report = {
+      at: TM.fmtDate(new Date()),
+      rate: s.rate, pass: s.pass, fix: s.fix, gap: s.gap,
+      keyDone: s.keyDone, total: s.total, judged: s.judged,
+      docs, members: members.length, roles: roles.length,
+    };
+    saved.executed = true;
+    saved.llmLog = rows;
+    TM.save();
+    window.LIVE.syncSoon();
+    setCheck(step, 'c1', true);
+    TM.save();
+    refreshGate(step, saved);
+
+    btn.disabled = false;
+    btn.innerHTML = icon('check') + ' 已执行';
+    logAct(`生成验收报告 · 通过率 ${s.rate}%`, '系统');
+    toast(`验收报告已生成 · 通过率 ${s.rate}%`);
+  }
+
+  /* 第 9 步：检查项按真实项目数据校正 */
+  function syncStep9Checks(step) {
+    if (!step || step.id !== 9) return false;
+    const s = testStats();
+    const members = S.members || [];
+    const roles = [...new Set(members.map((m) => m.role).filter(Boolean))];
+
+    step.checks[1].meta = s.fix ? `${s.fix} 项需整改 · 需写明处理期限` : '本项目没有需整改项';
+    step.checks[2].meta = `${roles.length} 种角色 · ${members.length} 人`;
+
+    let reverted = false;
+    if (setCheck(step, 'c1', !!S.project.report)) reverted = true;
+    if (setCheck(step, 'c3', roles.length >= 2)) reverted = true;
+    refreshGate(step, TM.stepState(step.id));
+    if (reverted) syncProgressUI();
+    return reverted;
+  }
+
+  /* 第 10 步 · 交付检查：软件能验的才验，线下动作如实标成待人工确认 */
+  async function runHandover(step, btn) {
+    const con = qi('#console');
+    const saved = TM.stepState(step.id);
+    btn.disabled = true;
+    btn.innerHTML = icon('refresh') + ' 正在核验…';
+    if (con) { con.style.display = 'block'; con.innerHTML = ''; }
+
+    const rows = [];
+    const say = (cls, text) => {
+      const t = TM.fmtTime(new Date());
+      rows.push([cls, text, t]);
+      if (!con) return;
+      const d = TM.el('div', '', `<span class="ts">${t}</span><span class="${cls}">${esc(text)}</span>`);
+      con.appendChild(d);
+      con.scrollTop = con.scrollHeight;
+    };
+
+    const members = S.members || [];
+    const admins = members.filter((m) => /管理员/.test(m.role || ''));
+    const staff = members.filter((m) => !/管理员|服务顾问/.test(m.role || ''));
+
+    say(admins.length ? 'ok' : 'warn',
+      admins.length ? `管理员账号已就位：${admins.map((a) => a.name).join('、')}` : '还没有企业管理员账号');
+    await sleep(240);
+    say('ok', `成员 ${members.length} 人 · 其中员工 ${staff.length} 人`);
+    await sleep(240);
+    say('ok', `知识库 ${(S.project.files || []).length} 份资料 · ${window.LIVE.kb?.chunks || '-'} 个切片`);
+    await sleep(240);
+    say('dim', '培训与备份恢复演练属线下动作，软件无法代替，请在线下完成后自行勾选');
+
+    // 维护期是真的写进 state，不是嘴上说说
+    S.project.maintenance = {
+      months: 12,
+      from: TM.fmtDate(new Date()),
+      contact: S.org.contact || S.user.name,
+    };
+    saved.executed = true;
+    saved.llmLog = rows;
+    TM.save();
+    window.LIVE.syncSoon();
+    setCheck(step, 'c1', admins.length > 0);
+    setCheck(step, 'c4', true);
+    TM.save();
+    refreshGate(step, saved);
+
+    btn.disabled = false;
+    btn.innerHTML = icon('check') + ' 已执行';
+    logAct('交付检查完成 · 维护期 12 个月已登记', '系统');
+    toast('交付检查完成，培训和备份演练请线下确认');
+  }
+
+  function syncStep10Checks(step) {
+    if (!step || step.id !== 10) return false;
+    const members = S.members || [];
+    const admins = members.filter((m) => /管理员/.test(m.role || ''));
+    step.checks[0].meta = admins.length ? `${admins[0].name} · 密码由客户自行设置` : '还没有管理员账号';
+    step.checks[3].meta = S.project.maintenance
+      ? `${S.project.maintenance.months} 个月 · ${S.project.maintenance.from} 起`
+      : '12 个月 · 执行交付检查后登记';
+
+    let reverted = false;
+    if (setCheck(step, 'c1', admins.length > 0)) reverted = true;
+    if (setCheck(step, 'c4', !!S.project.maintenance)) reverted = true;
+    refreshGate(step, TM.stepState(step.id));
+    if (reverted) syncProgressUI();
+    return reverted;
+  }
+
   function envBlock(step, st, saved) {
     if (window.LIVE && window.LIVE.on) return envBlockLive(step, st, saved);
-
     const env = S.project.env;
     const locked = st === 'locked';
     const done = !!env;
@@ -1497,24 +1726,29 @@
      第 7 步：测试工作台
      --------------------------------------------------------------------- */
   let testFilter = 'key';   // key | all
+  let testAsstId = null;    // 用哪个助手跑测试，null = 通用（全部资料）
+  let portalAsstId = null;  // 员工门户当前选中的助手
 
   function testStats() {
     const run = S.project.testRun;
     const Q = TM.TEST_QUESTIONS;
     const marks = run.marks || {};
-    let pass = 0, fix = 0, gap = 0;
+    let pass = 0, fix = 0, gap = 0, pending = 0;
     Q.forEach(q => {
       const m = marks[q.id] || q.r;
       if (m === 'pass') pass++;
       else if (m === 'fix') fix++;
-      else gap++;
+      else if (m === 'gap') gap++;
+      else pending++;
     });
+    const judged = pass + fix + gap;
     const keyTotal = Q.filter(q => q.key).length;
     const keyDone = Q.filter(q => q.key && marks[q.id]).length;
     return {
       ran: !!run.ran,
-      pass, fix, gap,
-      rate: Math.round(pass / Q.length * 100),
+      pass, fix, gap, pending, judged,
+      // 通过率只按"已判定"的题算，未判定的既不进分子也不进分母
+      rate: judged ? Math.round(pass / judged * 100) : 0,
       keyTotal, keyDone,
       total: Q.length,
     };
@@ -1537,7 +1771,8 @@
       <div class="test-stats__i test-stats__i--pass"><b>${s.pass}</b><span>通过</span></div>
       <div class="test-stats__i test-stats__i--fix"><b>${s.fix}</b><span>需修改</span></div>
       <div class="test-stats__i test-stats__i--gap"><b>${s.gap}</b><span>资料不足</span></div>
-      <div class="test-stats__i test-stats__i--rate"><b>${s.rate}%</b><span>${s.keyDone === s.keyTotal ? '通过率' : '预计通过率'}</span></div>
+      <div class="test-stats__i"><b>${s.pending}</b><span>待判定</span></div>
+      <div class="test-stats__i test-stats__i--rate"><b>${s.rate}%</b><span>${s.pending ? '预计通过率' : '通过率'}</span></div>
     </div>`;
   }
 
@@ -1570,6 +1805,16 @@
     const marks = run.marks || {};
 
     return `
+      ${(window.LIVE && window.LIVE.on && (window.LIVE.assistants || []).length) ? `
+        <div class="row mb12" style="gap:9px;align-items:center;flex-wrap:wrap">
+          <span class="fs12 dim">用哪个助手跑：</span>
+          <select class="select" id="testAsst" style="max-width:280px;height:32px;font-size:12px">
+            <option value="">通用（查全部资料）</option>
+            ${(window.LIVE.assistants || []).map((a) => `<option value="${esc(a.id)}" ${testAsstId === a.id ? 'selected' : ''}>${esc(a.name)}${a.scope && a.scope.length ? ` · ${esc(a.scope.join('/'))}` : ' · 全部'}</option>`).join('')}
+          </select>
+          <span class="fs11 muted">换助手会改变回答口吻和能查到的资料范围${run.ran ? '，换完要重新运行' : ''}</span>
+        </div>` : ''}
+
       <div id="testStatsWrap">${testStatsHTML()}</div>
 
       ${!run.ran ? `
@@ -1601,10 +1846,10 @@
 
       <div class="test-foot">
         ${run.ran
-          ? `<div class="fs12 ${s.keyDone === s.keyTotal ? 'dim' : 'muted'}">
-               ${s.keyDone === s.keyTotal
-                 ? `关键题已全部核对 · 通过率 <b style="color:${s.rate >= 85 ? 'var(--success)' : 'var(--warn)'}">${s.rate}%</b>（验收线 85%）`
-                 : `还有 ${s.keyTotal - s.keyDone} 道关键题待核对`}
+          ? `<div class="fs12 ${s.pending === 0 ? 'dim' : 'muted'}">
+               ${s.pending === 0
+                 ? `全部 ${s.total} 道已判定 · 通过率 <b style="color:${s.rate >= 85 ? 'var(--success)' : 'var(--warn)'}">${s.rate}%</b>（验收线 85%）`
+                 : `已判定 ${s.judged}/${s.total} 道 · 还有 ${s.pending} 道待判定，全部判完才算通过率`}
              </div>
              <div style="flex:1"></div>
              ${S.project.report
@@ -1640,6 +1885,13 @@
       renderStepPanel();
     });
 
+    const sa = qi('#testAsst');
+    if (sa) sa.onchange = () => {
+      testAsstId = sa.value || null;
+      const name = sa.options[sa.selectedIndex]?.textContent || '通用';
+      toast(`已切到「${name}」${S.project.testRun?.ran ? '，重新运行才生效' : ''}`);
+    };
+
     const br = qi('#btnRunBatch') || qi('#btnRerunBatch');
     if (br) br.onclick = async () => {
       const total = TM.TEST_QUESTIONS.length;
@@ -1658,7 +1910,7 @@
       }, 1200);
 
       try {
-        const r = await window.LIVE.runTests();
+        const r = await window.LIVE.runTests(testAsstId);
         clearInterval(timer);
         if (bar) bar.style.width = '100%';
         if (pct) pct.textContent = `${total} / ${total}`;
@@ -2049,6 +2301,46 @@
     });
   }
 
+  /* 第 7 步：检查项必须反映真实测试结果，不能写死「50 道 / 86%」 */
+  function syncStep7Checks(step) {
+    if (!step || step.id !== 7) return false;
+    if (!(window.LIVE && window.LIVE.on)) return false;
+
+    const L = window.LIVE;
+    const items = L.tests?.items || [];
+    const results = L.tests?.results || [];
+    const total = items.length;
+    const ran = results.length;
+    const pass = results.filter((r) => r.verdict === 'pass').length;
+    const fix = results.filter((r) => r.verdict === 'fix').length;
+    const gap = results.filter((r) => r.verdict === 'gap').length;
+    const marked = pass + fix + gap;
+    const rate = marked ? Math.round((pass / marked) * 100) : 0;
+    const keyItems = items.filter((t) => t.key);
+    const keyCount = keyItems.length;
+    const keyJudged = keyItems.filter((t) =>
+      results.some((r) => r.id === t.id && ['pass', 'fix', 'gap'].includes(r.verdict))
+    ).length;
+
+    step.checks[0].meta = total ? `共 ${total} 道 · 已跑 ${ran} 道` : '还没有出题';
+    step.checks[1].meta = keyCount ? `关键 ${keyCount} 道 · 已核对 ${keyJudged} 道` : '这批题没有标关键题';
+    step.checks[2].meta = marked
+      ? `已判定 ${marked}/${total} 道 · 通过率 ${rate}%（通过 ${pass} · 需改 ${fix} · 不足 ${gap}）`
+      : '还没有判定结果';
+
+    let reverted = false;
+    if (setCheck(step, 'c1', total > 0 && ran >= total)) reverted = true;
+    if (setCheck(step, 'c2', keyCount > 0 && keyJudged >= keyCount)) reverted = true;
+    // 必须全部判定完才谈通过率：只判 3 道就报 100%，等于自欺欺人
+    if (setCheck(step, 'c3', total > 0 && marked >= total && rate >= 85)) reverted = true;
+    refreshGate(step, TM.stepState(step.id));
+    if (reverted) {
+      toast('测试结果不满足验收条件，第 7 步需要重新确认', 'warn');
+      syncProgressUI();
+    }
+    return reverted;
+  }
+
   function syncStep8Checks(step) {
     if (!step || step.id !== 8) return false;
     let reverted = false;
@@ -2162,10 +2454,13 @@
       btn.disabled = false;
       btn.innerHTML = icon('check') + ' 已执行';
 
+      /* 系统能验证的第一项直接勾上，界面同步打勾（不能只改计数不打勾，客户会以为没生效） */
       const first = step.checks[0];
       if (first && !saved.checks.includes(first.id)) {
         saved.checks.push(first.id);
         TM.save();
+        const row = qi(`.checkline[data-check="${first.id}"]`);
+        if (row) row.classList.add('is-checked');
         refreshGate(step, saved);
       }
       window.LIVE.kb = r;
@@ -2180,6 +2475,7 @@
   /* 模型配置表单：第 5 步和配置中心共用 */
   function llmForm(compact) {
     const cfg = (window.LIVE && window.LIVE.llm) || { configured: false };
+    const isPlatform = !!cfg.configured && cfg.source === 'platform';
     const providers = [
       ['deepseek', 'DeepSeek', 'deepseek-chat'],
       ['dashscope', '通义千问', 'qwen-plus'],
@@ -2195,15 +2491,18 @@
           <div class="row" style="gap:8px">
             <span style="color:var(--success);display:flex">${icon('checkCircle')}</span>
             <div>
-              <b class="fs12">已配置：${esc(cfg.model)}</b>
-              <div class="fs11 muted mt2">密钥 ${esc(cfg.keyMasked)} · 存在本机，不上传</div>
+              <b class="fs12">${isPlatform ? '平台已内置模型' : '已配置'}：${esc(cfg.model)}</b>
+              <div class="fs11 muted mt2">${isPlatform
+                ? `密钥 ${esc(cfg.keyMasked)} · 由平台统一提供，出题和回答都已可用，不用自己填`
+                : `密钥 ${esc(cfg.keyMasked)} · 存在本机，不上传`}</div>
             </div>
           </div>
-          <button class="btn btn--quiet btn--sm" id="btnLlmEdit">${icon('edit')} 修改</button>
+          <button class="btn btn--quiet btn--sm" id="btnLlmEdit">${icon('edit')} ${isPlatform ? '改用我自己的 Key' : '修改'}</button>
         </div>` : `
         <div class="note note--warn mb12">${icon('key')}<span>还没有配置模型。没有模型，第 7 步出不了测试题，员工门户也只能返回原文片段、给不出回答。</span></div>`}
 
       <div id="llmFormBox" style="${cfg.configured && compact ? 'display:none' : ''}">
+        ${isPlatform ? `<div class="fs11 muted mb12">当前用的是平台内置 Key（${esc(cfg.keyMasked)}）。如果贵司有自己的账号，可以在下面换成自己的，费用走自己的额度；不填就继续用平台的。</div>` : ''}
         <div class="grid g2" style="gap:12px">
           <div class="field"><label class="field__label">服务商</label>
             <select class="select" id="llmProvider">
@@ -2265,8 +2564,12 @@
         apiKey: qi('#llmKey').value.trim(),
       };
       if (!cfg.model) return toast('先填模型名称', 'warn');
-      if (!cfg.apiKey && !(window.LIVE.llm && window.LIVE.llm.configured)) {
-        return toast('先填 API Key', 'warn');
+      const cur = window.LIVE.llm || {};
+      if (!cfg.apiKey) {
+        if (cur.source === 'platform') {
+          return toast('现在用的是平台内置 Key，已经能用了。要换成自己的账号，请先填写 Key', 'warn');
+        }
+        if (!cur.configured) return toast('先填 API Key', 'warn');
       }
 
       const box = qi('#llmResult');
@@ -2297,6 +2600,281 @@
         save.innerHTML = icon('zap') + ' 保存并测试连通';
       }
     };
+  }
+
+  /* =====================================================================
+     第 6 步 · AI 助手
+     这里的配置会真的进入模型调用：决定口吻、规则，以及只查哪几类资料
+     ===================================================================== */
+
+  const ASSISTANT_TEMPLATES = [
+    {
+      key: 'product', name: '产品知识助手', role: '产品顾问',
+      desc: '回答型号、参数、材质、包装、认证',
+      scope: ['产品资料'], tone: '简洁、直接',
+      prompt: '涉及型号参数时，先报型号再给数值，不要把多个型号的参数混在一起说。',
+      rules: { cite: true, refuse: true, brevity: true, noPrice: false },
+    },
+    {
+      key: 'sales', name: '销售知识助手', role: '外贸业务',
+      desc: '回答报价、付款、交期、账期',
+      scope: ['销售资料', '业务流程'], tone: '商务、谨慎',
+      prompt: '涉及条款时尽量用资料原话，不要替公司做额外承诺。',
+      rules: { cite: true, refuse: true, brevity: true, noPrice: true },
+    },
+    {
+      key: 'service', name: '售后政策助手', role: '售后客服',
+      desc: '回答退换货、质保、投诉处理',
+      scope: ['售后资料'], tone: '亲和、有耐心',
+      prompt: '先判断是质量问题还是人为损坏，再给处理方式，不要一概而论。',
+      rules: { cite: true, refuse: true, brevity: false, noPrice: false },
+    },
+  ];
+
+  const DOC_CATS_ALL = ['产品资料', '销售资料', '售后资料', '业务流程'];
+
+  function catCounts() {
+    const m = {};
+    for (const f of (S.project.files || [])) {
+      const c = f.cat || '产品资料';
+      m[c] = (m[c] || 0) + 1;
+    }
+    return m;
+  }
+
+  function ruleChips(a) {
+    const t = [];
+    if (a.rules?.cite) t.push('引用出处');
+    if (a.rules?.refuse) t.push('查不到就说不知道');
+    if (a.rules?.brevity) t.push('先给结论');
+    if (a.rules?.noPrice) t.push('价格只引原文');
+    return t.length ? t.join(' · ') : '未设规则';
+  }
+
+  function assistantPanel(step) {
+    if (!(window.LIVE && window.LIVE.on)) {
+      return `<div class="note note--info">${icon('info')}<span>演示模式下助手是预置数据。用本地服务打开才能真正创建并生效。</span></div>`;
+    }
+
+    const list = window.LIVE.assistants || [];
+    const counts = catCounts();
+    const totalDocs = (S.project.files || []).length;
+
+    if (!totalDocs) {
+      return `<div class="note note--warn">${icon('alert')}<span>还没有资料。助手建了也没东西可查，先到第 3 步上传资料。</span></div>`;
+    }
+
+    return `
+      <div class="row--between mb12" style="align-items:flex-start">
+        <div style="flex:1">
+          <b class="fs13">${list.length ? `已创建 ${list.length} 个助手` : '还没有助手'}</b>
+          <div class="fs11 muted mt4" style="line-height:1.6">助手决定回答的口吻和规则，也决定它能查哪几类资料。<br>第 7 步跑测试、第 8 步员工提问，都会按选中的助手来回答。</div>
+        </div>
+        <button class="btn btn--primary btn--sm" id="btnNewAssistant" style="flex:0 0 auto">${icon('plus')} 新建助手</button>
+      </div>
+
+      ${list.length ? `
+        <div class="stack" style="gap:9px">
+          ${list.map((a) => `
+            <div class="doc-item">
+              <span style="width:30px;height:30px;flex:0 0 auto;border-radius:8px;background:var(--brand-50);color:var(--brand);display:grid;place-items:center">${icon('bot')}</span>
+              <div class="doc-item__body">
+                <b>${esc(a.name)}${a.role ? ` · ${esc(a.role)}` : ''}</b>
+                <span>${esc(a.desc || '未填写负责范围')}</span>
+                <span class="fs11 muted">查：${a.scope && a.scope.length ? esc(a.scope.join(' / ')) : '全部资料'} · ${esc(ruleChips(a))}</span>
+              </div>
+              <button class="btn btn--quiet btn--sm" data-edit-a="${esc(a.id)}">${icon('edit')} 编辑</button>
+              <button class="btn btn--quiet btn--sm doc-item__del" data-del-a="${esc(a.id)}" title="删除">${icon('x')}</button>
+            </div>`).join('')}
+        </div>` : `
+        <div class="grid g3" style="gap:10px">
+          ${ASSISTANT_TEMPLATES.map((t) => {
+            const n = t.scope.reduce((s, c) => s + (counts[c] || 0), 0);
+            return `<div class="card" style="padding:14px;background:var(--surface-2);box-shadow:none;cursor:pointer" data-tpl="${t.key}">
+              <div class="fs13 b6">${esc(t.name)}</div>
+              <p class="fs11 muted mt4" style="line-height:1.55;min-height:32px">${esc(t.desc)}</p>
+              <div class="fs11 muted mt8">查 ${esc(t.scope.join(' / '))} · 现有 ${n} 份</div>
+              <div class="fs11 mt8" style="color:var(--brand);font-weight:600">一键创建 →</div>
+            </div>`;
+          }).join('')}
+        </div>`}
+
+      <div class="note note--info mt12">${icon('info')}<span>助手的资料范围会真的作用到检索上：范围外的资料不会被检索到，问到范围外的问题它会直接说明。想让它查更全，把范围留空即可。</span></div>
+    `;
+  }
+
+  function openAssistantEditor(step, existing, tpl) {
+    const base = existing || {
+      name: tpl?.name || '',
+      role: tpl?.role || '',
+      desc: tpl?.desc || '',
+      scope: tpl?.scope ? [...tpl.scope] : [],
+      prompt: tpl?.prompt || '',
+      tone: tpl?.tone || '简洁、直接',
+      rules: tpl?.rules || { cite: true, refuse: true, brevity: true, noPrice: false },
+    };
+    const counts = catCounts();
+    const tones = ['简洁、直接', '商务、谨慎', '亲和、有耐心', '严谨、偏技术'];
+
+    const sw = (id, label, hint, on) => `
+      <label class="row" style="gap:9px;align-items:flex-start;padding:7px 0;cursor:pointer">
+        <input type="checkbox" id="${id}" ${on ? 'checked' : ''} style="margin-top:2px;flex:0 0 auto">
+        <span style="flex:1">
+          <span class="fs12 b5">${esc(label)}</span>
+          <span class="fs11 muted" style="display:block;margin-top:2px">${esc(hint)}</span>
+        </span>
+      </label>`;
+
+    modal({
+      title: existing ? '编辑助手' : '新建助手',
+      desc: '这些设置会真的写进模型提示词，不是给人看的说明文字。',
+      wide: true,
+      body: `
+        <div class="grid g2" style="gap:12px">
+          <div class="field"><label class="field__label">助手名称 <i class="req">*</i></label>
+            <input class="input" id="asName" value="${esc(base.name)}" placeholder="例如 产品知识助手"></div>
+          <div class="field"><label class="field__label">岗位定位</label>
+            <input class="input" id="asRole" value="${esc(base.role)}" placeholder="例如 产品顾问"></div>
+        </div>
+
+        <div class="field"><label class="field__label">负责什么</label>
+          <input class="input" id="asDesc" value="${esc(base.desc)}" placeholder="例如 回答型号、参数、包装、认证"></div>
+
+        <div class="field">
+          <label class="field__label">能查哪些资料 <span class="fs11 muted">（都不选 = 查全部资料）</span></label>
+          <div class="row" id="asScope" style="gap:8px;flex-wrap:wrap">
+            ${DOC_CATS_ALL.map((c) => {
+              const on = (base.scope || []).includes(c);
+              return `<label class="row" style="gap:7px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+                <input type="checkbox" data-cat="${esc(c)}" ${on ? 'checked' : ''}>
+                <span class="fs12">${esc(c)}</span>
+                <span class="fs11 muted">${counts[c] || 0} 份</span>
+              </label>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <div class="field"><label class="field__label">语气</label>
+          <select class="select" id="asTone">
+            ${tones.map((t) => `<option ${base.tone === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="field"><label class="field__label">回答规则</label>
+          <div class="stack" style="gap:0">
+            ${sw('rCite', '必须能对上资料', '回答要能追溯到具体资料，出处由系统附在下面', base.rules?.cite !== false)}
+            ${sw('rRefuse', '查不到就说不知道', '资料里没有的直接说没有，不用常识补齐', base.rules?.refuse !== false)}
+            ${sw('rBrevity', '先给结论再补细节', '第一句话就回答问题，别先铺垫', base.rules?.brevity !== false)}
+            ${sw('rNoPrice', '价格只引原文', '价格、折扣、账期不推算、不改写', !!base.rules?.noPrice)}
+          </div>
+        </div>
+
+        <div class="field" style="margin-bottom:0"><label class="field__label">补充要求 <span class="fs11 muted">（原样写进提示词）</span></label>
+          <textarea class="textarea" id="asPrompt" rows="3" placeholder="例如：涉及型号参数时，先报型号再给数值。">${esc(base.prompt)}</textarea>
+        </div>`,
+      okText: existing ? '保存' : '创建助手',
+      onOk: async (back) => {
+        const name = back.querySelector('#asName').value.trim();
+        if (!name) { toast('填一下助手名称', 'warn'); return false; }
+
+        const scope = [...back.querySelectorAll('#asScope input[type=checkbox]')]
+          .filter((c) => c.checked)
+          .map((c) => c.dataset.cat);
+
+        const payload = {
+          id: existing?.id,
+          name,
+          role: back.querySelector('#asRole').value.trim(),
+          desc: back.querySelector('#asDesc').value.trim(),
+          scope,
+          tone: back.querySelector('#asTone').value,
+          prompt: back.querySelector('#asPrompt').value.trim(),
+          rules: {
+            cite: back.querySelector('#rCite').checked,
+            refuse: back.querySelector('#rRefuse').checked,
+            brevity: back.querySelector('#rBrevity').checked,
+            noPrice: back.querySelector('#rNoPrice').checked,
+          },
+        };
+
+        try {
+          await window.LIVE.saveAssistant(payload);
+          toast(existing ? `助手「${name}」已更新` : `助手「${name}」已创建`);
+          logAct(`${existing ? '更新' : '创建'}助手「${name}」${scope.length ? ` · 查 ${scope.join('/')}` : ' · 查全部资料'}`, '系统');
+          renderStepPanel();
+        } catch (e) {
+          toast(e.message || '保存失败', 'warn');
+          return false;
+        }
+      },
+    });
+  }
+
+  function bindAssistantPanel(step) {
+    const bn = qi('#btnNewAssistant');
+    if (bn) bn.onclick = () => openAssistantEditor(step, null, null);
+
+    qa('[data-tpl]').forEach((c) => {
+      c.onclick = () => {
+        const tpl = ASSISTANT_TEMPLATES.find((t) => t.key === c.dataset.tpl);
+        if (tpl) openAssistantEditor(step, null, tpl);
+      };
+    });
+
+    qa('[data-edit-a]').forEach((b) => {
+      b.onclick = () => {
+        const a = (window.LIVE.assistants || []).find((x) => x.id === b.dataset.editA);
+        if (a) openAssistantEditor(step, a, null);
+      };
+    });
+
+    qa('[data-del-a]').forEach((b) => {
+      b.onclick = async () => {
+        const a = (window.LIVE.assistants || []).find((x) => x.id === b.dataset.delA);
+        if (!a) return;
+        modal({
+          title: '删除助手',
+          desc: `删除「${a.name}」后，用它的员工就查不到东西了。`,
+          body: `<p class="fs12 dim">这个操作不可撤销。</p>`,
+          okText: '确认删除',
+          onOk: async () => {
+            try {
+              await window.LIVE.removeAssistant(a.id);
+              toast('助手已删除');
+              logAct(`删除助手「${a.name}」`, '系统');
+              renderStepPanel();
+            } catch (e) {
+              toast(e.message, 'warn');
+              return false;
+            }
+          },
+        });
+      };
+    });
+  }
+
+  /* 第 6 步：检查项跟着真实助手配置走 */
+  function syncStep6Checks(step) {
+    if (!step || step.id !== 6) return false;
+    if (!(window.LIVE && window.LIVE.on)) return false;
+
+    const list = window.LIVE.assistants || [];
+    const hasRules = list.some((a) => a.rules && (a.rules.cite || a.rules.refuse));
+    const hasScope = list.some((a) => a.scope && a.scope.length > 0);
+
+    step.checks[0].meta = list.length ? `已创建 ${list.length} 个` : '还没有助手';
+    step.checks[1].meta = hasRules ? '已写入模型提示词' : '尚未设置引用/拒答规则';
+    step.checks[2].meta = hasScope
+      ? list.filter((a) => a.scope?.length).map((a) => a.scope.join('/')).slice(0, 2).join('、')
+      : '按分类限定，避免答非所问';
+
+    let reverted = false;
+    if (setCheck(step, 'c1', list.length > 0)) reverted = true;
+    if (setCheck(step, 'c2', hasRules)) reverted = true;
+    if (setCheck(step, 'c3', hasScope)) reverted = true;
+    refreshGate(step, TM.stepState(step.id));
+    if (reverted) syncProgressUI();
+    return reverted;
   }
 
   function cfgModel() {
@@ -2923,6 +3501,13 @@
   function renderPortal(root) {
     const hot = ['HS-2041 的重量是多少？', '客户要 30 天账期怎么回复？', '最小起订量和混装规则？', '售后换货运费谁承担？', 'CE 证书编号是多少？'];
 
+    const liveOn = !!(window.LIVE && window.LIVE.on);
+    const asstList = liveOn ? (window.LIVE.assistants || []) : [];
+    if (liveOn && portalAsstId && !asstList.some((a) => a.id === portalAsstId)) portalAsstId = null;
+    const curAsst = asstList.find((a) => a.id === portalAsstId) || asstList[0] || null;
+    if (curAsst) portalAsstId = curAsst.id;
+    const docN = (S.project.files || []).length;
+
     root.innerHTML = `<div class="page">
       ${pageHead('员工门户', '这是你团队员工看到的界面。他们不需要理解知识库、切片、模型，只需要问问题。',
         `<button class="btn btn--ghost btn--sm" id="btnCopyLink">${icon('external')} 复制门户链接</button>`)}
@@ -2932,10 +3517,15 @@
           <div class="portal-chat__head">
             <span style="width:30px;height:30px;border-radius:8px;background:var(--brand-50);color:var(--brand);display:grid;place-items:center">${icon('bot')}</span>
             <div style="flex:1">
-              <div class="fs12 b6">恒森 · 产品与销售助手</div>
-              <div class="fs11 muted">基于 5 份内部资料 · 回答均标注出处</div>
+              <div class="fs12 b6">${esc(curAsst ? curAsst.name : (liveOn ? '通用助手' : '恒森 · 产品与销售助手'))}</div>
+              <div class="fs11 muted">${liveOn
+                ? `基于 ${docN} 份内部资料${curAsst?.scope?.length ? ` · 只查 ${esc(curAsst.scope.join('/'))}` : ' · 查全部资料'}`
+                : '基于 5 份内部资料 · 回答均标注出处'}</div>
             </div>
-            <span class="badge badge--success badge--dot">在线</span>
+            ${liveOn && asstList.length > 1 ? `
+              <select class="select" id="portalAsst" style="max-width:190px;height:30px;font-size:11.5px" title="切换助手">
+                ${asstList.map((a) => `<option value="${esc(a.id)}" ${a.id === portalAsstId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
+              </select>` : `<span class="badge badge--success badge--dot">在线</span>`}
           </div>
 
           <div class="portal-chat__body" id="chatBody">
@@ -3027,7 +3617,7 @@
       if (window.LIVE && window.LIVE.on) {
         /* 真实问答：检索 + 模型生成 */
         try {
-          const res = await window.LIVE.ask(text);
+          const res = await window.LIVE.ask(text, portalAsstId);
           typing.remove();
 
           if (res.error) {
@@ -3092,6 +3682,15 @@
     }
 
     qi('#btnSend').onclick = () => send(input.value);
+
+    // 切换助手：换个岗位问，回答的口吻和资料范围跟着变
+    const pa = qi('#portalAsst');
+    if (pa) pa.onchange = () => {
+      portalAsstId = pa.value;
+      const a = (window.LIVE.assistants || []).find((x) => x.id === portalAsstId);
+      renderPortal(root);
+      toast(a ? `已切到「${a.name}」${a.scope?.length ? ` · 只查 ${a.scope.join('/')}` : ''}` : '已切换助手');
+    };
     input.onkeydown = (e) => { if (e.key === 'Enter') send(input.value); };
     qa('[data-q]').forEach(c => c.onclick = () => send(c.dataset.q));
     qi('#btnCopyLink').onclick = () => toast('门户链接已复制：maozhiku.cn/h/hensen');
