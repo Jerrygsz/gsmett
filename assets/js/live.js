@@ -147,6 +147,12 @@
         slices: 0,
         state: d.status === 'empty' ? 'ocr' : 'ok',
         scanned: d.scanned,
+        hasOcr: !!d.hasOcr,
+        ocrChars: d.ocrChars || 0,
+        ocrTries: d.ocrTries || 0,
+        ocrFail: d.ocrFail || '',
+        ocrNote: d.ocrNote || '',
+        qa: Array.isArray(d.qa) ? d.qa : [],
         sourcePath: d.sourcePath || '',
         sourceDir: d.sourceDir || '',
       }));
@@ -358,6 +364,37 @@
       if (ids && ids.length) payload.ids = ids;
       if (limit) payload.limit = limit;
       const r = await API.classifyDocs(this.clientId, payload);
+      if (r.error) {
+        const e = new Error(r.error);
+        e.data = r;
+        throw e;
+      }
+      this.docs = (await API.docs(this.clientId)).docs || [];
+      return r;
+    },
+
+    /* 扫描件识别文字：一批最多 4 份，调用方循环直到 done */
+    async ocrDocs(ids, limit, pages) {
+      const payload = {};
+      if (ids && ids.length) payload.ids = ids;
+      if (limit) payload.limit = limit;
+      if (pages) payload.pages = pages;
+      const r = await API.ocrDocs(this.clientId, payload);
+      if (r.error) {
+        const e = new Error(r.error);
+        e.data = r;
+        throw e;
+      }
+      this.docs = (await API.docs(this.clientId)).docs || [];
+      return r;
+    },
+
+    /* 补跑「能回答什么问题」，不改分类 */
+    async docQa(ids, limit) {
+      const payload = {};
+      if (ids && ids.length) payload.ids = ids;
+      if (limit) payload.limit = limit;
+      const r = await API.docQa(this.clientId, payload);
       if (r.error) {
         const e = new Error(r.error);
         e.data = r;

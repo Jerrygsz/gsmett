@@ -18,6 +18,7 @@ import { probeEnvironment } from './env.js';
 import { parseFile, isSupported, extOf, SUPPORTED } from './parser.js';
 import { chunkDoc, buildIndex, search } from './kb.js';
 import * as LLM from './llm.js';
+import { renderPdfImages, ocrImages, explainNoVision } from './ocr.js';
 import {
   ROOT, initStorage, listClients, getClient, saveClient, nextProjectNo, deleteClient,
   getState, saveState, patchState, getDocs, saveDocs, getIndex, saveIndex,
@@ -229,16 +230,71 @@ const CAT_SYS = `你是企业资料库的归类助手。把每份资料归入下
 ${DOC_CAT_GUIDE}
 
 判断时以正文内容为主，文件名只作参考。
+
+同时，为每份资料写出「员工看这份资料能问出什么问题」——2 到 3 个，必须是一线员工真会问的口语问题，
+并且答案确实能在这份资料里找到。例如「GC07 这款车载充电器输出多少瓦？」「MOQ 是多少？」「保修多久？」。
+不要写成"了解产品参数""查看报价"这种目录式的空话。
+
 只输出 JSON 数组，不要解释、不要 markdown 代码块，格式：
-[{"i":1,"cat":"销售资料","why":"含阶梯报价与PI号"}]
-i 对应资料序号；why 用不超过 20 个字说明判断依据（如"表头是阶梯报价单"）。`;
+[{"i":1,"cat":"销售资料","why":"含阶梯报价与PI号","q":["GC07 的 FOB 报价是多少？","1000 台的单价能到多少？"]}]
+i 对应资料序号；why 用不超过 20 个字说明判断依据；q 是 2–3 个问题，每个不超过 30 字。`;
 
 /* manual=人手动改过（AI 不再覆盖）；ai=模型判定；rule=只有文件名规则 */
 const catSourceOf = (d) => d.catSource || 'rule';
 
-/* 读正文节选：直接读解析后的副本，单份最多取 maxChars 字 */
+/* 对外返回的资料记录：去掉本机绝对路径，补上前端要用的标记 */
+const publicDoc = (d) => ({
+  ...d,
+  cat: docCat(d),
+  catSource: catSourceOf(d),
+  textPath: undefined,
+  ocrPath: undefined,
+  hasOcr: !!d.ocrPath,
+  qa: Array.isArray(d.qa) ? d.qa : [],
+});
+
+const QA_SYS = `你是外贸制造企业的老员工，帮同事看看「手里这份资料能拿来回答什么问题」。
+
+为每份资料写 2–3 个一线员工真会问的口语问题，答案必须能在这份资料里找到。
+要具体到型号、数字、条件，不要「了解产品参数」这种目录式的话。
+好例子：「GC07 的输出功率是多少？」「1000 台的单价能到多少？」「保修期多久，谁付运费？」
+只输出 JSON 数组，不要解释、不要 markdown 代码块：
+[{"i":1,"q":["GC07 输出多少瓦？","MOQ 是多少？"]}]
+每个问题不超过 30 字，i 对应资料序号。`;
+
+function parseQaJSON(text, n) {
+  const raw = String(text || '');
+  const a = raw.indexOf('[');
+  const b = raw.lastIndexOf(']');
+  let arr = null;
+  if (a >= 0 && b > a) { try { arr = JSON.parse(raw.slice(a, b + 1)); } catch { } }
+  const out = new Map();
+  if (Array.isArray(arr)) {
+    for (const it of arr) {
+      const i = Number(it && it.i);
+      if (!(i >= 1 && i <= n)) continue;
+      const qs = Array.isArray(it.q)
+        ? it.q.map((x) => String(x || '').trim()).filter((x) => x.length >= 4 && x.length <= 60).slice(0, 3)
+        : [];
+      if (qs.length) out.set(i, qs);
+    }
+  }
+  return out;
+}
+
+/* 扫描件：有 OCR 文本就用 OCR 的，没有才现解析 */
+function ocrTextOf(d) {
+  if (!d.ocrPath) return '';
+  try {
+    return fs.readFileSync(d.ocrPath, 'utf8').trim();
+  } catch { return ''; }
+}
+
+/* 读正文节选：OCR 结果优先，其次解析原始文件，单份最多取 maxChars 字 */
 async function docExcerpt(d, maxChars = 900) {
   try {
+    const ocr = ocrTextOf(d);
+    if (ocr) return ocr.replace(/\s+/g, ' ').trim().slice(0, maxChars);
     const buf = fs.readFileSync(d.textPath);
     const parsed = await parseFile(buf, d.name);
     return String(parsed.text || '').replace(/\s+/g, ' ').trim().slice(0, maxChars);
@@ -257,7 +313,10 @@ function parseCatJSON(text, n) {
       const i = Number(it && it.i);
       const cat = String((it && it.cat) || '').trim();
       if (i >= 1 && i <= n && DOC_CATS.includes(cat)) {
-        out.set(i, { cat, why: String((it && it.why) || '').slice(0, 40) });
+        const qs = Array.isArray(it?.q)
+          ? it.q.map((x) => String(x || '').trim()).filter((x) => x.length >= 4 && x.length <= 60).slice(0, 3)
+          : [];
+        out.set(i, { cat, why: String((it && it.why) || '').slice(0, 40), q: qs });
       }
     }
   }
@@ -267,18 +326,38 @@ function parseCatJSON(text, n) {
 /* 一批资料（建议 ≤10 份）交给模型判定，返回每份的分类与理由 */
 async function classifyDocs(id, cfg, targets) {
   const items = [];
-  for (const d of targets) items.push({ doc: d, excerpt: await docExcerpt(d) });
+  /* 每份带分类 + 依据 + 2–3 个问题，8 份一批时输出会明显变长。
+   * 原来固定 1500 tokens 会把 JSON 截断，模型返回的数组解析不出来，整批都判失败。 */
+  for (const d of targets) items.push({ doc: d, excerpt: await docExcerpt(d, 700) });
 
   const body = items
     .map((it, i) => `【${i + 1}】文件名：${it.doc.name}\n内容：${it.excerpt || '（读不出文本，可能是扫描件或空文件）'}`)
     .join('\n\n');
 
-  const r = await LLM.chat(cfg, [
+  const call = (payload, n) => LLM.chat(cfg, [
     { role: 'system', content: CAT_SYS },
-    { role: 'user', content: body },
-  ], { maxTokens: 1500, temperature: 0 });
+    { role: 'user', content: payload },
+  ], { maxTokens: Math.min(700 + n * 260, 3200), temperature: 0 });
 
-  const map = parseCatJSON(r.content, items.length);
+  let r = await call(body, items.length);
+  let map = parseCatJSON(r.content, items.length);
+  let usageTotal = r.usage?.total || 0;
+
+  /* 整批一条都解析不出来，通常是模型输出被截断或格式跑偏。
+   * 不要整批算失败——拆成单份再跑一遍，最多多花几次调用，保证每份都有结论。 */
+  if (map.size === 0 && items.length > 1) {
+    map = new Map();
+    for (let i = 0; i < items.length; i++) {
+      const one = items[i];
+      try {
+        const rr = await call(`【1】文件名：${one.doc.name}\n内容：${one.excerpt || '（读不出文本）'}`, 1);
+        usageTotal += rr.usage?.total || 0;
+        const m1 = parseCatJSON(rr.content, 1);
+        if (m1.has(1)) map.set(i + 1, m1.get(1));
+      } catch { /* 单份也失败就跳过，记到 failed 里 */ }
+    }
+  }
+
   const docs = getDocs(id);
   const updated = [];
   const failed = [];
@@ -297,7 +376,12 @@ async function classifyDocs(id, cfg, targets) {
         ? `无文字层，仅凭文件名${hit.why ? '：' + hit.why : '判断'}`
         : (hit.why || '');
       target.catAt = new Date().toISOString();
-      updated.push({ id: target.id, name: target.name, cat: hit.cat, why: target.catWhy, low: noText });
+      /* 能回答什么问题：给门户做「试试这样问」，也给第 6 步挑助手范围做参照 */
+      if (hit.q && hit.q.length) {
+        target.qa = hit.q;
+        target.qaAt = target.catAt;
+      }
+      updated.push({ id: target.id, name: target.name, cat: hit.cat, why: target.catWhy, low: noText, qa: target.qa || [] });
     } else {
       /* 模型漏了这一份：保留文件名规则结果，标记出来让人知道没判成功 */
       if (!target.cat) { target.cat = guessCat(target.name); target.catSource = 'rule'; }
@@ -308,7 +392,7 @@ async function classifyDocs(id, cfg, targets) {
   saveDocs(id, docs);
 
   const st = ensureState(id);
-  addUsage(st, r.usage);
+  addUsage(st, { total: usageTotal });
   if (updated.length) {
     st.activity = st.activity || [];
     st.activity.unshift({
@@ -795,7 +879,13 @@ async function importEntries(clientId, entries) {
         const rec = await ingestPath(abs, clientId, ent.dir);
         const i = docs.findIndex((d) => d.id === prev.id);
         try { fs.unlinkSync(prev.textPath); } catch { }
-        const merged = { ...rec, id: prev.id, cat: prev.cat, addedAt: prev.addedAt || rec.addedAt };
+        /* 文件内容变了，旧的 OCR 文字就作废；分类和问题清单保留，等下次分析覆盖 */
+        if (prev.ocrPath) { try { fs.unlinkSync(prev.ocrPath); } catch { } }
+        const merged = {
+          ...rec, id: prev.id, cat: prev.cat, catSource: prev.catSource, catWhy: prev.catWhy,
+          catLow: prev.catLow, catAt: prev.catAt, qa: prev.qa, qaAt: prev.qaAt,
+          addedAt: prev.addedAt || rec.addedAt,
+        };
         if (i >= 0) docs[i] = merged; else docs.push(merged);
         bySource.set(abs, merged);
         updated.push({ name: rec.name });
@@ -832,8 +922,15 @@ async function buildKbForClient(id) {
   const chunks = [];
   const perDoc = [];
   for (const d of docs) {
-    const buf = fs.readFileSync(d.textPath);
-    const parsed = await parseFile(buf, d.name);
+    /* 扫描件已经 OCR 过就直接用识别出的文字，否则原始文件里是空的 */
+    const ocr = ocrTextOf(d);
+    let parsed;
+    if (ocr) {
+      parsed = { text: ocr, pages: d.ocrPages || d.pages || 1, byPage: null };
+    } else {
+      const buf = fs.readFileSync(d.textPath);
+      parsed = await parseFile(buf, d.name);
+    }
     const cs = chunkDoc(parsed);
     cs.forEach((c) => chunks.push({ ...c, doc: d.name, docId: d.id }));
     perDoc.push({ id: d.id, name: d.name, chunks: cs.length, pages: parsed.pages });
@@ -1189,7 +1286,7 @@ async function route(req, res, url) {
   /* --- 资料 --- */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs$/)) && method === 'GET') {
     requireClient(m[1]);
-    const docs = getDocs(m[1]).map((d) => ({ ...d, cat: docCat(d), catSource: catSourceOf(d), textPath: undefined }));
+    const docs = getDocs(m[1]).map(publicDoc);
     return sendJSON(res, 200, { docs });
   }
 
@@ -1250,6 +1347,232 @@ async function route(req, res, url) {
     });
   }
 
+  /* 扫描件 OCR：把没有文字层的 PDF 渲染成图片，交给视觉模型读字。
+   * 前端按批调用（默认每批 2 份），跑完再用 /docs/classify 带上 ids 重判分类。 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs\/ocr$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const st = ensureState(id);
+    const cfg = effectiveLLM(st);
+    if (!cfg || !cfg.apiKey) {
+      return sendJSON(res, 400, {
+        error: '还没有配置模型 Key。扫描件识别要用能读图片的模型，去第 5 步填一个（智谱 / 通义 / OpenAI 都行）。',
+        needKey: true,
+      });
+    }
+    const vision = LLM.visionModelFor(cfg);
+    if (!vision) {
+      return sendJSON(res, 400, { error: explainNoVision(cfg.provider), noVision: true, provider: cfg.provider });
+    }
+
+    const all = getDocs(id);
+    const limit = Math.min(Math.max(Number(b.limit) || 2, 1), 4);
+    const maxPages = Math.min(Math.max(Number(b.pages) || 2, 1), 3);
+    /* 认两次还认不出的（条码页、纯照片页）就别再烧 token 了，留给人看 */
+    const needOcr = (d) => !d.ocrPath && d.ext === 'pdf'
+      && (d.scanned || d.status === 'empty' || (d.chars || 0) < 20)
+      && (d.ocrTries || 0) < 2;
+
+    let pool;
+    if (Array.isArray(b.ids) && b.ids.length) {
+      const set = new Set(b.ids.map(String));
+      pool = all.filter((d) => set.has(d.id) && d.ext === 'pdf');
+      /* 手动指定 = 明确要重试，把失败计数清零 */
+      pool.forEach((d) => { d.ocrTries = 0; d.ocrFail = ''; });
+    } else {
+      pool = all.filter(needOcr);
+    }
+
+    const targets = pool.slice(0, limit);
+    if (!targets.length) {
+      return sendJSON(res, 200, { updated: [], failed: [], done: true, remaining: 0, total: all.length, visionModel: vision });
+    }
+
+    const queue = targets.slice();
+    const updated = [];
+    const failed = [];
+    const skipped = [];
+    let usageTotal = 0;
+
+    /* 并发 2：单份要 10–20 秒，串行跑 86 份要半小时，太慢 */
+    const worker = async () => {
+      while (queue.length) {
+        const d = queue.shift();
+        try {
+          const buf = fs.readFileSync(d.textPath);
+
+          /* 先按文字层再解一次：补了 cMap 之后，一些「看着像扫描件」的中文 PDF
+           * 其实能直接读出字来，这种情况不必调视觉模型，省钱也更准 */
+          const again = await parseFile(buf, d.name);
+          if ((again.chars || 0) >= 20) {
+            Object.assign(d, {
+              chars: again.chars,
+              pages: again.pages,
+              scanned: false,
+              empty: false,
+              status: 'ok',
+              reparsedAt: new Date().toISOString(),
+            });
+            updated.push({ id: d.id, name: d.name, chars: again.chars, pages: again.pages, reparsed: true });
+            continue;
+          }
+
+          const { images, totalPages } = await renderPdfImages(buf, { maxPages });
+          const r = await ocrImages(cfg, images, { model: vision });
+
+          /* 整页是产品照片/条码：模型明确说没有字。这不是失败，标出来别再重试 */
+          if (r.noText) {
+            d.ocrTries = 2;
+            d.ocrNote = '整页是图片或产品照片，没有可读文字';
+            d.ocrFailAt = new Date().toISOString();
+            skipped.push({ id: d.id, name: d.name, reason: d.ocrNote });
+            continue;
+          }
+
+          const text = String(r.text || '').trim();
+          const chars = text.replace(/\s/g, '').length;
+          if (chars < 10) throw new Error('识别不到文字，图片可能太模糊或是纯图片页');
+
+          const ocrPath = path.join(path.dirname(d.textPath), `${d.id}.ocr.txt`);
+          fs.writeFileSync(ocrPath, text, 'utf8');
+          Object.assign(d, {
+            ocrPath,
+            ocrChars: chars,
+            ocrAt: new Date().toISOString(),
+            ocrModel: r.model,
+            ocrPages: r.pages,
+            ocrTotalPages: totalPages,
+            status: 'ok',
+            qaSkip: undefined,
+          });
+          usageTotal += r.usage?.total || 0;
+          updated.push({ id: d.id, name: d.name, chars, pages: r.pages });
+        } catch (e) {
+          d.ocrTries = (d.ocrTries || 0) + 1;
+          d.ocrFail = e.message || '识别失败';
+          d.ocrFailAt = new Date().toISOString();
+          failed.push({ id: d.id, name: d.name, reason: d.ocrFail, tries: d.ocrTries });
+        }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+
+    saveDocs(id, all);
+
+    if (usageTotal) {
+      addUsage(st, { total: usageTotal });
+      st.activity = st.activity || [];
+      st.activity.unshift({
+        t: new Date().toISOString().slice(5, 16).replace('T', ' '),
+        txt: `识别了 ${updated.length} 份扫描件的文字（${vision}）`,
+        who: 'AI 助手',
+      });
+      saveState(id, st);
+    }
+
+    const after = getDocs(id);
+    const remaining = after.filter(needOcr).length;
+    const givenUp = after.filter((d) => !d.ocrPath && d.ext === 'pdf' && (d.ocrTries || 0) >= 2).length;
+    return sendJSON(res, 200, {
+      updated,
+      failed,
+      skipped,
+      remaining,
+      givenUp,
+      done: remaining === 0,
+      total: after.length,
+      visionModel: vision,
+      usage: { total: usageTotal },
+    });
+  }
+
+  /* 老资料补跑「能回答什么问题」：不改分类，只生成 2–3 个员工真会问的问题 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs\/qa$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const st = ensureState(id);
+    const cfg = effectiveLLM(st);
+    if (!cfg || !cfg.apiKey) return sendJSON(res, 400, { error: '还没有配置模型 Key', needKey: true });
+
+    const all = getDocs(id);
+    const limit = Math.min(Math.max(Number(b.limit) || 8, 1), 20);
+    const hasQa = (d) => Array.isArray(d.qa) && d.qa.length > 0;
+    /* 没有文字的资料（整页是照片）问不出东西，别让模型照着文件名编 */
+    const hasText = (d) => !!d.ocrPath || (d.chars || 0) > 20;
+    const pool = Array.isArray(b.ids) && b.ids.length
+      ? all.filter((d) => b.ids.map(String).includes(d.id))
+      : all.filter((d) => !hasQa(d) && hasText(d) && !d.qaSkip);
+    const targets = pool.slice(0, limit);
+    if (!targets.length) return sendJSON(res, 200, { updated: [], done: true, remaining: 0 });
+
+    const items = [];
+    const skipped = [];
+    for (const d of targets) {
+      const excerpt = await docExcerpt(d, 700);
+      if (excerpt.replace(/\s/g, '').length < 20) {
+        d.qaSkip = true;
+        d.qaSkippedAt = new Date().toISOString();
+        skipped.push({ id: d.id, name: d.name, reason: '没有可读文字' });
+        continue;
+      }
+      items.push({ doc: d, excerpt });
+    }
+    if (!items.length) {
+      saveDocs(id, all);
+      const rest = getDocs(id).filter((d) => !hasQa(d) && hasText(d) && !d.qaSkip).length;
+      return sendJSON(res, 200, { updated: [], skipped, remaining: rest, done: rest === 0 });
+    }
+    const body = items
+      .map((it, i) => `【${i + 1}】文件名：${it.doc.name}\n内容：${it.excerpt || '（读不出文本）'}`)
+      .join('\n\n');
+
+    const callQa = (payload, n) => LLM.chat(cfg, [
+      { role: 'system', content: QA_SYS },
+      { role: 'user', content: payload },
+    ], { maxTokens: Math.min(500 + n * 220, 2400), temperature: 0 });
+
+    let r;
+    try {
+      r = await callQa(body, items.length);
+    } catch (e) {
+      return sendJSON(res, 502, { error: e.message || '模型调用失败', code: e.code || 'LLM' });
+    }
+
+    let map = parseQaJSON(r.content, items.length);
+    let usageTotal = r.usage?.total || 0;
+
+    /* 同样的坑：一批 12 份输出被截断就整批空手。拆单补跑，别让客户看着进度不动 */
+    if (map.size === 0 && items.length > 1) {
+      map = new Map();
+      for (let i = 0; i < items.length; i++) {
+        try {
+          const rr = await callQa(`【1】文件名：${items[i].doc.name}\n内容：${items[i].excerpt}`, 1);
+          usageTotal += rr.usage?.total || 0;
+          const m1 = parseQaJSON(rr.content, 1);
+          if (m1.has(1)) map.set(i + 1, m1.get(1));
+        } catch { /* 单份失败就留着下次再补 */ }
+      }
+    }
+    const updated = [];
+    items.forEach((it, idx) => {
+      const qs = map.get(idx + 1);
+      if (!qs || !qs.length) return;
+      const d = all.find((x) => x.id === it.doc.id);
+      if (!d) return;
+      d.qa = qs;
+      d.qaAt = new Date().toISOString();
+      updated.push({ id: d.id, name: d.name, qa: qs });
+    });
+    saveDocs(id, all);
+    addUsage(st, { total: usageTotal });
+    saveState(id, st);
+
+    const remaining = getDocs(id).filter((d) => !hasQa(d) && hasText(d) && !d.qaSkip).length;
+    return sendJSON(res, 200, { updated, skipped, remaining, done: remaining === 0, usage: { total: usageTotal }, model: r.model });
+  }
+
   /* 改资料分类：分类直接决定哪些助手能查到它，得让人能纠正 */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs\/([\w]+)$/)) && method === 'PATCH') {
     const id = m[1];
@@ -1263,7 +1586,7 @@ async function route(req, res, url) {
     d.catSource = 'manual';
     d.catWhy = '';
     saveDocs(id, docs);
-    return sendJSON(res, 200, { ok: true, docs: docs.map((x) => ({ ...x, cat: docCat(x), catSource: catSourceOf(x), textPath: undefined })) });
+    return sendJSON(res, 200, { ok: true, docs: docs.map(publicDoc) });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs$/)) && method === 'POST') {
@@ -1285,7 +1608,7 @@ async function route(req, res, url) {
     }
     saveDocs(id, docs);
     return sendJSON(res, 200, {
-      added: result.added.map((d) => ({ ...d, textPath: undefined })),
+      added: result.added.map(publicDoc),
       failed: result.failed,
       replaced,
       total: docs.length,
@@ -1299,6 +1622,7 @@ async function route(req, res, url) {
     const d = docs.find((x) => x.id === docId);
     if (d) {
       try { fs.unlinkSync(d.textPath); } catch { }
+      if (d.ocrPath) { try { fs.unlinkSync(d.ocrPath); } catch { } }
     }
     saveDocs(id, docs.filter((x) => x.id !== docId));
     return sendJSON(res, 200, { ok: true });

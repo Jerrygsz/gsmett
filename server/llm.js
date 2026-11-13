@@ -12,13 +12,36 @@ const DEFAULTS = {
 };
 
 export const PROVIDERS = {
-  deepseek: { baseURL: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'] },
-  dashscope: { baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-turbo'] },
-  zhipu: { baseURL: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-flash'] },
-  moonshot: { baseURL: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k'] },
-  openai: { baseURL: 'https://api.openai.com/v1', models: ['gpt-4o-mini', 'gpt-4o'] },
-  custom: { baseURL: '', models: [] },
+  deepseek: { baseURL: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'], vision: [] },
+  dashscope: {
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['qwen-plus', 'qwen-max', 'qwen-turbo'],
+    vision: ['qwen-vl-max', 'qwen-vl-plus'],
+  },
+  zhipu: {
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['glm-4-plus', 'glm-4-flash'],
+    // 扫描件 OCR 用这几个：glm-4v-flash 便宜、够认表格，glm-4v-plus 更准
+    vision: ['glm-4v-flash', 'glm-4v-plus', 'glm-4v'],
+  },
+  moonshot: {
+    baseURL: 'https://api.moonshot.cn/v1',
+    models: ['moonshot-v1-8k', 'moonshot-v1-32k'],
+    vision: ['moonshot-v1-8k-vision-preview'],
+  },
+  openai: {
+    baseURL: 'https://api.openai.com/v1',
+    models: ['gpt-4o-mini', 'gpt-4o'],
+    vision: ['gpt-4o-mini', 'gpt-4o'],
+  },
+  custom: { baseURL: '', models: [], vision: [] },
 };
+
+/** 这个服务商有没有能读图片的模型；没有就得让客户换一家 */
+export function visionModelFor(cfg = {}) {
+  if (cfg.visionModel) return cfg.visionModel;
+  return PROVIDERS[cfg.provider]?.vision?.[0] || '';
+}
 
 class LLMError extends Error {
   constructor(message, code, status) {

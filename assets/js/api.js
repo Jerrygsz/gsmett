@@ -93,6 +93,10 @@
     deleteDoc(id, docId) { return this.del(`/api/clients/${id}/docs/${docId}`); },
     setDocCat(id, docId, cat) { return this.patch(`/api/clients/${id}/docs/${docId}`, { cat }); },
     classifyDocs(id, body) { return this.post(`/api/clients/${id}/docs/classify`, body || {}, { timeout: 180000 }); },
+    /* 扫描件识别：每份要渲染 + 调视觉模型，单次等 3 分钟 */
+    ocrDocs(id, body) { return this.post(`/api/clients/${id}/docs/ocr`, body || {}, { timeout: 240000 }); },
+    /* 为资料生成「能回答什么问题」 */
+    docQa(id, body) { return this.post(`/api/clients/${id}/docs/qa`, body || {}, { timeout: 180000 }); },
 
     /* ---------- 本地文件夹扫描（真实读硬盘） ---------- */
     scan(id, dirs, recursive) { return this.post(`/api/clients/${id}/scan`, { dirs, recursive }, { timeout: 180000 }); },
@@ -105,7 +109,7 @@
     resolveDirs(q) { return this.post('/api/fs/resolve', { q }, { timeout: 20000 }); },
 
     /* ---------- 知识库 ---------- */
-    buildKb(id) { return this.post(`/api/clients/${id}/kb/build`, {}); },
+    buildKb(id) { return this.post(`/api/clients/${id}/kb/build`, {}, { timeout: 300000 }); },
     kbStats(id) { return this.get(`/api/clients/${id}/kb/stats`); },
     search(id, q, topK) { return this.post(`/api/clients/${id}/kb/search`, { q, topK }); },
 

@@ -1541,6 +1541,15 @@
     const pendingCat = files.filter(f => f.catSource !== 'ai' && f.catSource !== 'manual').length;
     const aiDone = files.filter(f => f.catSource === 'ai').length;
     const lowCat = files.filter(f => f.catLow).length;
+    /* 扫描件：还没识别出文字的那些，是检索和分类都读不到的黑洞。
+     * 认过两次仍认不出的（条码页、纯照片页）单独计数，不再自动重试。 */
+    const scanTodo = files.filter(f => f.scanned && !f.hasOcr && (f.ocrTries || 0) < 2).length;
+    const ocrDone = files.filter(f => f.hasOcr).length;
+    const ocrGiveUp = files.filter(f => !f.hasOcr && (f.ocrTries || 0) >= 2).length;
+    /* 已经 AI 判过分类、但还没生成「能回答什么问题」的资料（老数据）。
+     * 整页是图、没有文字的资料问不出问题，不算在里面，否则按钮会一直点不完 */
+    const noQa = files.filter(f => f.catSource === 'ai' && !(f.qa || []).length
+      && (f.hasOcr || (f.chars || 0) > 20)).length;
 
     return `
       <div class="card card--pad mb16" id="scanCard">
@@ -1575,11 +1584,41 @@
         ` : `<div class="note note--info">${icon('info')}<span>扫描硬盘需要本地服务在运行（<span class="mono">node server/index.js</span> 或双击「启动服务.bat」）。当前是演示模式，只能手动添加文件。</span></div>`}
       </div>
 
+      ${(scanTodo || ocrDone) ? `
+      <div class="card card--pad mb16" id="ocrCard">
+        <div class="ai-cat__head">
+          <div class="ai-cat__intro">
+            <b class="fs13">第二步：识别扫描件文字</b>
+            <div class="fs11 muted" style="line-height:1.6;margin-top:2px">${scanTodo
+              ? `有 ${scanTodo} 份是扫描件或图片型 PDF，文件里没有文字层——搜不到内容，分类也只能靠文件名猜。系统会把页面渲染成图片，用能看图的模型把字读出来，识别完自动重判分类。`
+              : (ocrGiveUp
+                ? `${ocrDone} 份扫描件已经认出文字并入知识库；另有 ${ocrGiveUp} 份整页是产品照片、包装稿或条码，本来就没有可读文字。`
+                : '没有需要识别的扫描件，所有资料都能直接读到文字。')}</div>
+          </div>
+          <button class="btn ${scanTodo ? 'btn--primary' : 'btn--ghost'} btn--sm ai-cat__btn" id="btnOcr" ${scanTodo ? '' : 'disabled'}>
+            ${scanTodo ? `识别 ${scanTodo} 份扫描件` : (ocrDone || ocrGiveUp ? '没有待识别的扫描件' : '没有扫描件')}
+          </button>
+        </div>
+        <div class="ai-cat__meta mt10">
+          <span class="ai-cat__pill ${ocrDone ? 'is-on' : ''}">已识别文字 <b>${ocrDone}</b></span>
+          <span class="ai-cat__pill ${scanTodo ? 'is-warn' : ''}">待识别 <b>${scanTodo}</b></span>
+          ${ocrGiveUp ? `<span class="ai-cat__pill is-warn" title="这类页面多是条码、照片或空白页，模型认不出字，建议人工看一眼">认不出 <b>${ocrGiveUp}</b></span>
+          <button class="btn btn--quiet btn--sm" id="btnOcrRetry">重试这 ${ocrGiveUp} 份</button>` : ''}
+          <span class="fs11 muted" style="align-self:center">每份约 10 秒 · 默认只读前 2 页</span>
+        </div>
+        <div class="ai-cat__bar" id="ocrBar" hidden><i></i></div>
+        <div class="fs11 muted mt8" id="ocrStat" style="line-height:1.6">${scanTodo
+          ? '识别用的是能读图片的模型（智谱 GLM-4V / 通义 Qwen-VL / OpenAI 都行）。当前配置的模型如果不支持图片，会提示你换一个。'
+          : (ocrGiveUp
+            ? '认不出的多是产品彩页封面、彩盒刀版和条码标签，本来就没几行字。需要的话可以点「重试」，或者人工看一眼补一份文字版。'
+            : '扫描件都识别完了，里面的文字已经进知识库，员工可以搜到。')}</div>
+      </div>` : ''}
+
       <div class="card card--pad mb16" id="aiCatCard">
         <div class="ai-cat__head">
           <div class="ai-cat__intro">
-            <b class="fs13">第二步：AI 分析分类</b>
-            <div class="fs11 muted" style="line-height:1.6;margin-top:2px">系统会读每份资料的正文内容（不只是文件名），判断它属于产品 / 销售 / 业务流程 / 售后哪一类，并给出判断依据。分类决定员工问问题时能不能检索到这份资料。</div>
+            <b class="fs13">第三步：AI 分析分类</b>
+            <div class="fs11 muted" style="line-height:1.6;margin-top:2px">系统会读每份资料的正文内容（不只是文件名），判断它属于产品 / 销售 / 业务流程 / 售后哪一类，说明判断依据，并写出「这份资料能回答什么问题」。分类决定员工问问题时能不能检索到这份资料。</div>
           </div>
           <button class="btn ${pendingCat ? 'btn--primary' : 'btn--ghost'} btn--sm ai-cat__btn" id="btnAiCat" ${pendingCat ? '' : 'disabled'}>
             ${pendingCat ? `分析 ${pendingCat} 份待分类资料` : (aiDone ? '已全部分析完成' : '暂无可分析资料')}
@@ -1592,12 +1631,13 @@
             return `<span class="ai-cat__pill ${n ? 'is-on' : ''}">${c} <b>${n}</b>${ai ? `<i class="fs11 muted"> · AI ${ai}</i>` : ''}</span>`;
           }).join('')}
           <span class="ai-cat__pill ${pendingCat ? 'is-warn' : ''}">待分析 <b>${pendingCat}</b></span>
+          ${noQa ? `<button class="btn btn--quiet btn--sm" id="btnDocQa" style="margin-left:auto">为 ${noQa} 份资料补生成「能回答的问题」</button>` : ''}
         </div>
         <div class="ai-cat__bar" id="aiCatBar" hidden><i></i></div>
         <div class="fs11 muted mt8" id="aiCatStat" style="line-height:1.6">${pendingCat
           ? '点上面的按钮开始。每批分析 10 份，中途可以离开这个页面，进度会停在这一批结束的位置。'
           : (lowCat
-            ? `分类已完成：${aiDone - lowCat} 份是 AI 读过正文判定的；另有 ${lowCat} 份是扫描件（没有文字层），只能按文件名判断，已标成「待复核」，建议抽空人工确认。`
+            ? `分类已完成：${aiDone - lowCat} 份是 AI 读过正文判定的；另有 ${lowCat} 份是扫描件，当时没识别出文字，只能按文件名判断，已标成「待复核」。先在第二步识别扫描件，再点一次分析，这几份就能按真实内容重判。`
             : '分类已全部由 AI 读过正文判定。手动改过分类的资料会保住你的选择，不会被 AI 覆盖。')}</div>
       </div>
 
@@ -1656,18 +1696,27 @@
 
   function docRow(d) {
     const tag = d.catSource === 'ai'
-      ? (d.catLow
-        ? `<span class="doc-tag doc-tag--todo" title="这是扫描件，没有文字层，AI 只能按文件名判断，建议人工确认">待复核</span>`
+      ? (d.catLow && !d.hasOcr
+        ? `<span class="doc-tag doc-tag--todo" title="这是扫描件，没有文字层，AI 只能按文件名判断，建议先识别扫描件再分析">待复核</span>`
         : `<span class="doc-tag doc-tag--ai" title="AI 读过内容后判定">AI 判定</span>`)
       : d.catSource === 'manual'
         ? `<span class="doc-tag doc-tag--man" title="你手动指定的分类，AI 不会覆盖">手动</span>`
         : `<span class="doc-tag doc-tag--todo" title="只按文件名推断，建议用 AI 分析一次">待分析</span>`;
+    const ocrMark = d.hasOcr
+      ? `<span class="doc-tag doc-tag--ocr" title="扫描件已识别出文字，内容可被检索">已识别</span>`
+      : (d.scanned
+        ? `<span class="doc-tag doc-tag--todo" title="${esc(d.ocrNote || d.ocrFail || (d.ocrTries ? '试过识别但没读到文字，可能是纯图片页' : '扫描件，没有文字层，搜不到内容'))}">${d.ocrNote ? '整页是图' : '无文字层'}</span>`
+        : '');
+    const qaLine = (d.qa && d.qa.length)
+      ? `<span class="doc-qa" title="员工问这些，这份资料答得上来">${icon('help')} 能回答：${d.qa.slice(0, 2).map(q => esc(q)).join(' · ')}</span>`
+      : '';
     return `<div class="doc-item" data-id="${esc(d.id)}">
       <span class="doc-item__ext">${esc(d.ext || 'FILE')}</span>
       <div class="doc-item__body">
-        <div class="doc-item__title"><b>${esc(d.name)}</b>${tag}</div>
-        <span>${esc(d.size)}${d.slices ? ' · 约 ' + d.slices + ' 个切片' : ''}${d.state === 'ocr' ? ' · 已 OCR' : ''}${d.sourcePath ? ' · 文件夹导入' : ''}</span>
+        <div class="doc-item__title"><b>${esc(d.name)}</b>${tag}${ocrMark}</div>
+        <span>${esc(d.size)}${d.pages ? ` · ${d.pages} 页` : ''}${d.hasOcr ? ` · 识别出 ${d.ocrChars || 0} 字` : ''}${d.slices ? ' · 约 ' + d.slices + ' 个切片' : ''}${d.sourcePath ? ' · 文件夹导入' : ''}</span>
         ${d.catSource === 'ai' && d.catWhy ? `<span class="doc-why">${icon('info')} ${esc(d.catWhy)}</span>` : ''}
+        ${qaLine}
       </div>
       <select class="select select--sm" data-cat="${esc(d.id)}" aria-label="资料分类">
         ${TM.DOC_CATS.map(c => `<option ${c === d.cat ? 'selected' : ''}>${c}</option>`).join('')}
@@ -1822,6 +1871,115 @@
 
       const btnAi = qi('#btnAiCat');
       if (btnAi) btnAi.onclick = () => aiClassify(null);
+
+      /* ---- 扫描件识别文字（OCR） ---- */
+      const OCR_BATCH = 4;
+
+      function ocrUI() {
+        return { btn: qi('#btnOcr'), bar: qi('#ocrBar'), stat: qi('#ocrStat') };
+      }
+
+      function ocrProgress(cur, total, ok, fail) {
+        const { bar, stat } = ocrUI();
+        if (bar) {
+          bar.hidden = false;
+          const fill = bar.firstElementChild;
+          if (fill) fill.style.width = Math.min(100, Math.round((cur / Math.max(total, 1)) * 100)) + '%';
+        }
+        if (stat) {
+          stat.textContent = `正在识别：已处理 ${cur} / ${total} 份${fail ? ` · ${fail} 份没认出文字` : ''}。这一步比分类慢，单份约 10 秒。`;
+        }
+      }
+
+      async function runOcr(retryIds) {
+        if (!(window.LIVE && window.LIVE.on)) { toast('识别扫描件需要本地服务在运行', 'warn'); return; }
+        const todo = retryIds && retryIds.length
+          ? retryIds.length
+          : (S.project.files || []).filter(f => f.scanned && !f.hasOcr && (f.ocrTries || 0) < 2).length;
+        if (!todo) { toast('没有需要识别的扫描件', 'info'); return; }
+
+        const ui = ocrUI();
+        if (ui.btn) { ui.btn.disabled = true; ui.btn.textContent = '识别中…'; }
+        ocrProgress(0, todo, 0, 0);
+
+        const ids = [];
+        let ok = 0, fail = 0, skip = 0;
+        try {
+          for (let guard = 0; guard < 400; guard++) {
+            const r = retryIds && retryIds.length
+              ? await window.LIVE.ocrDocs(retryIds.splice(0, OCR_BATCH), OCR_BATCH, 2)
+              : await window.LIVE.ocrDocs(null, OCR_BATCH, 2);
+            ok += (r.updated || []).length;
+            fail += (r.failed || []).length;
+            skip += (r.skipped || []).length;
+            (r.updated || []).forEach(u => ids.push(u.id));
+            ocrProgress(Math.min(ok + fail + skip, todo), todo, ok, fail);
+            if (r.done) break;
+            if (!(r.updated || []).length && !(r.failed || []).length && !(r.skipped || []).length) break;
+          }
+
+          window.LIVE.paint(); TM.save(); syncDocChecks(step); renderStepPanel();
+          if (ok) logAct(`识别了 ${ok} 份扫描件的文字`);
+
+          if (ids.length) {
+            toast(`识别出 ${ok} 份扫描件的文字，正按内容重判分类`, 'info');
+            await aiClassify(ids);
+            try {
+              toast('正在把识别出的文字并入知识库…', 'info');
+              await window.LIVE.buildKb();
+              toast('知识库已重建，扫描件里的内容现在能搜到了', 'info');
+            } catch (e) {
+              toast('知识库重建失败：' + e.message, 'warn');
+            }
+          } else if (skip) {
+            toast(`这 ${skip} 份整页都是图片（产品照片/条码），没有可读文字，已跳过`, 'info');
+          } else {
+            toast(fail ? `这 ${fail} 份没认出文字，可能是纯图片页或太模糊` : '没有需要识别的资料', fail ? 'warn' : 'info');
+          }
+        } catch (e) {
+          const cur = ocrUI();
+          if (cur.btn) { cur.btn.disabled = false; cur.btn.textContent = '重试识别'; }
+          if (e.data && e.data.needKey) toast('还没配置模型 Key，先去第 5 步填一个', 'warn');
+          else if (e.data && e.data.noVision) toast(e.message, 'warn');
+          else toast(e.message || '识别失败', 'warn');
+        }
+      }
+
+      const btnOcr = qi('#btnOcr');
+      if (btnOcr) btnOcr.onclick = () => runOcr(null);
+
+      const btnOcrRetry = qi('#btnOcrRetry');
+      if (btnOcrRetry) btnOcrRetry.onclick = () => {
+        const ids = (S.project.files || []).filter(f => !f.hasOcr && (f.ocrTries || 0) >= 2).map(f => f.id);
+        if (!ids.length) { toast('没有需要重试的资料', 'info'); return; }
+        runOcr(ids);
+      };
+
+      /* ---- 老资料补生成「能回答什么问题」 ---- */
+      const btnQa = qi('#btnDocQa');
+      if (btnQa) btnQa.onclick = async () => {
+        const todo = (S.project.files || []).filter(f => f.catSource === 'ai' && !(f.qa || []).length).length;
+        if (!todo) { toast('没有需要补的资料', 'info'); return; }
+        btnQa.disabled = true;
+        btnQa.textContent = '生成中…';
+        let done = 0;
+        try {
+          for (let guard = 0; guard < 200; guard++) {
+            const r = await window.LIVE.docQa(null, 12);
+            done += (r.updated || []).length;
+            const stat = qi('#aiCatStat');
+            if (stat) stat.textContent = `正在生成问题清单：${done} / ${todo} 份。每份会给出 2–3 个员工真会问的问题。`;
+            if (r.done || !(r.updated || []).length) break;
+          }
+          window.LIVE.paint(); TM.save(); renderStepPanel();
+          logAct(`为 ${done} 份资料生成「能回答的问题」`);
+          toast(done ? `已为 ${done} 份资料生成可回答的问题` : '这次没生成出问题，稍后再试', done ? 'info' : 'warn');
+        } catch (e) {
+          btnQa.disabled = false;
+          btnQa.textContent = '重新生成';
+          toast(e.message || '生成失败', 'warn');
+        }
+      };
 
       /* 真正加入并扫描（确认后走这里） */
       async function runImport(raw, items) {
@@ -3138,6 +3296,29 @@
     return m;
   }
 
+  /* 从资料里取「这类资料能回答什么问题」的样例句，用于第 6 步挑范围时做参照 */
+  function catSamples(cats, n = 3) {
+    const out = [];
+    const want = (cats && cats.length) ? cats : null;
+    for (const f of (S.project.files || [])) {
+      if (want && !want.includes(f.cat)) continue;
+      for (const q of (f.qa || [])) {
+        if (!q || out.includes(q)) continue;
+        out.push(q);
+        if (out.length >= n) return out;
+      }
+    }
+    return out;
+  }
+
+  function scopeSampleHtml(scope) {
+    const qs = catSamples(scope, 3);
+    if (!qs.length) {
+      return `还没有可参照的问题。把第 3 步的「AI 分析分类」跑完，这里会显示这类资料实际能回答的问题。`;
+    }
+    return `${scope && scope.length ? '选中这几类，它能回答' : '不限范围时，它能回答'}：${qs.map(q => `「${q}」`).join(' ')}`;
+  }
+
   function ruleChips(a) {
     const t = [];
     if (a.rules?.cite) t.push('引用出处');
@@ -3187,9 +3368,11 @@
         <div class="grid g3" style="gap:10px">
           ${ASSISTANT_TEMPLATES.map((t) => {
             const n = t.scope.reduce((s, c) => s + (counts[c] || 0), 0);
+            const sample = catSamples(t.scope, 1)[0];
             return `<div class="card" style="padding:14px;background:var(--surface-2);box-shadow:none;cursor:pointer" data-tpl="${t.key}">
               <div class="fs13 b6">${esc(t.name)}</div>
               <p class="fs11 muted mt4" style="line-height:1.55;min-height:32px">${esc(t.desc)}</p>
+              ${sample ? `<p class="fs11 mt4" style="line-height:1.5;color:var(--text-2)">例如：${esc(sample)}</p>` : ''}
               <div class="fs11 muted mt8">查 ${esc(t.scope.join(' / '))} · 现有 ${n} 份</div>
               <div class="fs11 mt8" style="color:var(--brand);font-weight:600">一键创建 →</div>
             </div>`;
@@ -3276,7 +3459,7 @@
         </span>
       </label>`;
 
-    modal({
+    const m = modal({
       title: existing ? '编辑助手' : '新建助手',
       desc: '这些设置会真的写进模型提示词，不是给人看的说明文字。',
       wide: true,
@@ -3303,6 +3486,7 @@
               </label>`;
             }).join('')}
           </div>
+          <div class="fs11 muted mt8" id="asScopePreview" style="line-height:1.6;background:var(--surface-2);border-radius:8px;padding:8px 10px">${scopeSampleHtml(base.scope)}</div>
         </div>
 
         <div class="field"><label class="field__label">语气</label>
@@ -3359,6 +3543,18 @@
         }
       },
     });
+
+    /* 勾选范围时实时刷新「能回答什么」的例句，让人按内容挑范围，而不是按分类名猜 */
+    const scopeBox = m.root.querySelector('#asScope');
+    const preview = m.root.querySelector('#asScopePreview');
+    if (scopeBox && preview) {
+      scopeBox.addEventListener('change', () => {
+        const picked = [...scopeBox.querySelectorAll('input[type=checkbox]')]
+          .filter((c) => c.checked)
+          .map((c) => c.dataset.cat);
+        preview.innerHTML = esc(scopeSampleHtml(picked)).replace(/「([^」]+)」/g, '<b>「$1」</b>');
+      });
+    }
   }
 
   function bindAssistantPanel(step) {
@@ -4183,8 +4379,23 @@
     if (curAsst) portalAsstId = curAsst.id;
     const docN = liveOn ? (window.LIVE.docs || []).length : (S.project.files || []).length;
 
-    /* 快捷问题不再预置别人的产品问题；员工自己问 */
-    const hot = [];
+    /* 快捷问题不再预置别人的产品问题；直接用「这份资料能回答什么问题」里生成的问题。
+     * 按助手范围过滤，每个分类最多取一条，保证问出来的是这家企业资料里真有的东西。 */
+    const scopeCats = (curAsst && curAsst.scope && curAsst.scope.length) ? curAsst.scope : null;
+    const qaPool = [];
+    const seenCat = {};
+    for (const d of (liveOn ? (window.LIVE.docs || []) : [])) {
+      if (scopeCats && !scopeCats.includes(d.cat)) continue;
+      const qs = Array.isArray(d.qa) ? d.qa : [];
+      if (!qs.length) continue;
+      if (!scopeCats && seenCat[d.cat]) continue;   // 不限范围时，一类只出一条，避免全是报价单
+      const q = qs[0];
+      if (!q || qaPool.includes(q)) continue;
+      qaPool.push(q);
+      seenCat[d.cat] = true;
+      if (qaPool.length >= 4) break;
+    }
+    const hot = qaPool;
 
     /* 答不上来的问题：真的记录员工问过、库里也确实没有的，
      * 以前这里是写死的三条示例，客户会以为系统在替别人算账 */
@@ -4224,6 +4435,7 @@
 
           <div class="portal-chat__foot">
             ${hot.length ? `<div class="prompt-chips">
+              <span class="fs11 muted" style="align-self:center;margin-right:2px">试试这样问</span>
               ${hot.map(q => `<button class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}
             </div>` : ''}
             <div class="chat-input">

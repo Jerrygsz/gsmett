@@ -3,6 +3,7 @@
  * 不 OCR —— 扫描件会明确告诉客户"这份读不出字，需要先转文字版"
  */
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const SUPPORTED = ['pdf', 'docx', 'xlsx', 'xls', 'csv', 'txt', 'md', 'markdown', 'json'];
 
@@ -15,6 +16,20 @@ export function isSupported(name) {
 }
 
 /* ---------------- PDF ---------------- */
+
+/**
+ * pdfjs 处理中文 PDF 需要 cMap（字体编码表）和标准字体数据，
+ * 不传这两个目录，CID 字体的文字层会被读成空——很多「扫描件」其实只是缺了它们。
+ */
+export function pdfAssetUrls() {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'pdfjs-dist');
+  return {
+    cMapUrl: pathToFileURL(path.join(root, 'cmaps') + path.sep).href,
+    cMapPacked: true,
+    standardFontDataUrl: pathToFileURL(path.join(root, 'standard_fonts') + path.sep).href,
+  };
+}
+
 async function parsePDF(buf) {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
@@ -24,6 +39,7 @@ async function parsePDF(buf) {
     isEvalSupported: false,
     useWorkerFetch: false,
     disableFontFace: true,
+    ...pdfAssetUrls(),
   });
   const doc = await task.promise;
 

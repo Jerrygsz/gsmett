@@ -13,3 +13,6 @@ tickets.json
 *.key
 .env
 .env.*
+
+# 本地排查用的临时脚本与截图，不进仓库
+tools/tmp/

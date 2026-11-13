@@ -760,8 +760,12 @@ table{border-collapse:collapse;width:100%}
 .doc-tag--ai{color:var(--success);border-color:#B7E4C9;background:var(--success-bg)}
 .doc-tag--man{color:var(--brand-700);border-color:var(--brand-100);background:var(--brand-50)}
 .doc-tag--todo{color:var(--warn);border-color:#F0DCB4;background:var(--warn-bg)}
+.doc-tag--ocr{color:var(--brand-700);border-color:var(--brand-100);background:var(--brand-50)}
 .doc-why{display:flex;align-items:flex-start;gap:4px;font-size:11px;color:var(--text-4);margin-top:3px;line-height:1.5}
 .doc-why svg{width:11px;height:11px;flex:0 0 11px;margin-top:2px;opacity:.7}
+/* 这份资料能回答什么问题 */
+.doc-qa{display:flex!important;align-items:flex-start;gap:4px;font-size:11px;color:var(--text-3);margin-top:3px;line-height:1.55;overflow-wrap:anywhere}
+.doc-qa svg{width:11px;height:11px;flex:0 0 11px;margin-top:2px;opacity:.65;color:var(--brand)}
 
 /* AI 分析分类卡片 */
 .ai-cat__head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
@@ -1010,8 +1014,11 @@ table{border-collapse:collapse;width:100%}
   .topbar__search{display:none}
   .page-head{flex-direction:column}
   .modal{max-width:100%}
-  /* 移动端放开标题省略号，避免关键信息被截断 */
+  /* 移动端放开标题省略号，避免关键信息被截断。
+   * 文件名单独占一行，分类标签另起一行——否则标签会卡在折行文字中间，像重叠 */
   .doc-item__body b{white-space:normal;overflow:visible;text-overflow:clip}
+  .doc-item__title{flex-wrap:wrap;row-gap:4px}
+  .doc-item__title b{flex:1 1 100%}
   .card__title,.item-title{white-space:normal;overflow:visible}
 }
 
