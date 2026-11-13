@@ -569,7 +569,7 @@
           <div class="step-block">
             <div class="step-block__label">需要你操作</div>
             ${st === 'locked'
-              ? `<div class="note note--warn">${icon('lock')}<span>完成第 7 步「知识库测试」后即可邀请员工试用。</span></div>`
+              ? `<div class="note note--warn">${icon('lock')}<span>完成第 7 步「知识库测试」后即可添加试用成员。</span></div>`
               : inviteBox()}
           </div>` : ''}
 
@@ -2186,7 +2186,7 @@
   }
 
   /* ---------------------------------------------------------------------
-     第 8 步：员工试用（邀请成员 + 提问计数 + 反馈）
+     第 8 步：员工试用（添加成员 + 提问计数 + 反馈）
      --------------------------------------------------------------------- */
   const staffMembers = () => (S.members || []).filter(m => m.role !== '企业管理员' && m.role !== '服务顾问');
 
@@ -2199,22 +2199,29 @@
       <div class="row--between mb12">
         <div>
           <b class="fs13">试用成员 ${staff.length} 人</b>
-          <div class="fs11 muted mt4">受邀成员只能使用助手，看不到配置与原始资料</div>
+          <div class="fs11 muted mt4">成员只能使用助手，看不到配置与原始资料</div>
         </div>
-        <button class="btn btn--ghost btn--sm" id="btnInvite">${icon('userPlus')} 邀请员工</button>
+        <div class="row" style="gap:8px">
+          <button class="btn btn--quiet btn--sm" id="btnCopyPortal">${icon('external')} 复制门户链接</button>
+          <button class="btn btn--ghost btn--sm" id="btnInvite">${icon('userPlus')} 添加成员</button>
+        </div>
       </div>
+
+      <div class="note note--info mb12" style="font-size:11px">
+        ${icon('info')}<span>系统不发邮件。加完成员后，把门户链接发给对方就能用。</span>
+      </div>
+
       <div class="stack" style="gap:7px">
         ${staff.length ? staff.map(m => `
           <div class="doc-item">
-            <span class="avatar" style="width:30px;height:30px;font-size:11px;background:${m.status === 'active' ? '#2C5866' : '#7A5C2E'}">${esc(m.name.slice(0, 1))}</span>
+            <span class="avatar" style="width:30px;height:30px;font-size:11px;background:#2C5866">${esc(m.name.slice(0, 1))}</span>
             <div class="doc-item__body">
               <b>${esc(m.name)} · ${esc(m.role)}</b>
-              <span>${esc(m.email)} · 邀请于 ${esc(m.at)}</span>
+              <span>${m.email ? esc(m.email) + ' · ' : ''}添加于 ${esc(m.at)}</span>
             </div>
-            <span class="badge ${m.status === 'active' ? 'badge--success badge--dot' : ''}">${m.status === 'active' ? '已激活' : '待接受'}</span>
-            ${m.status !== 'active' ? `<button class="btn btn--quiet btn--sm" data-reinvite="${esc(m.id)}">重发</button>` : ''}
+            <span class="badge badge--success badge--dot">可用</span>
             <button class="btn btn--quiet btn--sm doc-item__del" data-remove="${esc(m.id)}" title="移除">${icon('x')}</button>
-          </div>`).join('') : `<div class="empty" style="padding:22px 0">${icon('users')}<p class="fs12">还没有邀请员工。试用期的反馈比测试题更真实。</p></div>`}
+          </div>`).join('') : `<div class="empty" style="padding:22px 0">${icon('users')}<p class="fs12">还没有添加成员。试用期的反馈比测试题更真实。</p></div>`}
       </div>
     </div>
 
@@ -2253,10 +2260,25 @@
       else { renderStepPanel(); toast(`已移除 ${m.name}`, 'info'); }
     });
 
-    qa('[data-reinvite]').forEach(b => b.onclick = () => {
-      const m = (S.members || []).find(x => x.id === b.dataset.reinvite);
-      toast(`邀请邮件已重发给 ${m ? m.email : '对方'}`);
-    });
+    const bc = qi('#btnCopyPortal');
+    if (bc) bc.onclick = async () => {
+      const id = (window.LIVE && window.LIVE.clientId) || '';
+      const url = id
+        ? `${location.origin}/app.html?c=${id}#portal`
+        : `${location.origin}/app.html#portal`;
+      try {
+        await navigator.clipboard.writeText(url);
+        toast('门户链接已复制，发给员工就行');
+      } catch {
+        // 非 https 下浏览器可能禁用剪贴板，退回到选中提示
+        modal({
+          title: '门户链接',
+          desc: '复制下面这个地址，发给需要试用的同事。',
+          body: `<input class="input mono" id="portalUrlOut" value="${esc(url)}" readonly onclick="this.select()">`,
+          okText: '知道了',
+        });
+      }
+    };
 
     const bf = qi('#btnFeedback');
     if (bf) bf.onclick = () => modal({
@@ -2282,31 +2304,31 @@
 
   function openInvite(step) {
     modal({
-      title: '邀请员工试用',
-      desc: '受邀成员只能使用助手，看不到配置与原始资料。',
+      title: '添加试用成员',
+      desc: '添加后对方就能用助手。系统不发邮件——加完把门户链接发给对方即可。',
       body: `<div class="field"><label class="field__label">姓名 <i class="req">*</i></label>
           <input class="input" id="invName" placeholder="例如 张浩"></div>
-        <div class="field"><label class="field__label">企业邮箱 <i class="req">*</i></label>
-          <input class="input" id="invEmail" placeholder="name@hensen-tools.com"></div>
+        <div class="field"><label class="field__label">邮箱 <span class="fs11 muted">（选填，只做备注）</span></label>
+          <input class="input" id="invEmail" placeholder="name@company.com"></div>
         <div class="field" style="margin-bottom:0"><label class="field__label">角色</label>
           <select class="select" id="invRole"><option>销售员工</option><option>销售主管</option><option>技术</option><option>客服</option></select></div>`,
-      okText: '发送邀请',
+      okText: '添加成员',
       onOk: (back) => {
         const name = back.querySelector('#invName').value.trim();
         const email = back.querySelector('#invEmail').value.trim();
         const role = back.querySelector('#invRole').value;
         if (!name) { toast('填一下姓名', 'warn'); return false; }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('邮箱格式不对', 'warn'); return false; }
-        if ((S.members || []).some(x => x.email.toLowerCase() === email.toLowerCase())) {
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('邮箱格式不对，或者留空', 'warn'); return false; }
+        if (email && (S.members || []).some(x => (x.email || '').toLowerCase() === email.toLowerCase())) {
           toast('这个邮箱已经在成员列表里了', 'warn');
           return false;
         }
-        S.members.push({ id: 'm' + Date.now(), name, email, role, status: 'pending', at: TM.fmtDate(new Date()) });
+        S.members.push({ id: 'm' + Date.now(), name, email, role, status: 'active', at: TM.fmtDate(new Date()) });
         TM.save();
-        logAct(`邀请成员 ${name}（${role}）`);
+        logAct(`添加成员 ${name}（${role}）`);
         if (step) renderStepPanel();
         else router();
-        toast(`邀请已发送给 ${name}`);
+        toast(`${name} 已加入。把门户链接发给他就能用`);
       },
     });
   }
@@ -3209,26 +3231,24 @@
   function renderMembers(root) {
     const people = S.members || [];
     const AV = ['#2C5866', '#7A5C2E', '#3E4F63', '#4A6B76', '#5B4A6B', '#2F5E4E'];
-    const active = people.filter(p => p.status === 'active').length;
-    const pending = people.filter(p => p.status === 'pending').length;
     const roles = new Set(people.map(p => p.role)).size;
 
-    const statusCell = (s) => s === 'active'
-      ? '<span class="badge badge--success badge--dot">在线</span>'
-      : s === 'limited'
-        ? '<span class="badge badge--warn badge--dot">受限访问</span>'
-        : '<span class="badge">待接受</span>';
+    /* 本地系统没有"邀请-接受"流程：加进来就能用，不存在待接受。
+     * 以前这里显示"待接受"，客户会一直等一封永远不来的邮件。 */
+    const statusCell = (s) => s === 'limited'
+      ? '<span class="badge badge--warn badge--dot">受限访问</span>'
+      : '<span class="badge badge--success badge--dot">可用</span>';
 
     root.innerHTML = `<div class="page page--narrow">
       ${pageHead('成员与权限', '谁能看什么、谁能改什么。服务顾问只有在你授权后才能进入本项目。',
-        `<button class="btn btn--primary btn--sm" id="btnInviteM">${icon('userPlus')} 邀请成员</button>`)}
+        `<button class="btn btn--primary btn--sm" id="btnInviteM">${icon('userPlus')} 添加成员</button>`)}
 
       <div class="grid g4 mb20">
         ${[
-          ['成员总数', String(people.length), `含 1 位外部服务顾问`],
-          ['已激活', String(active), pending ? `${pending} 人待接受邀请` : '全部已接受'],
+          ['成员总数', String(people.length), people.length ? '都能直接用助手' : '还没有添加'],
           ['角色数', String(roles), '管理员 / 主管 / 员工 / 顾问'],
-          ['数据隔离', '已启用', '企业间不可互访'],
+          ['提问次数', String(S.portalAsks || 0), '员工门户真实提问'],
+          ['资料可见范围', '按助手', '每个助手只管一类资料'],
         ].map(([k, v, s]) => `
           <div class="card card--pad">
             <div class="fs11 muted">${k}</div>
@@ -3297,7 +3317,7 @@
         desc: m.email,
         body: `<div class="stack" style="gap:0">
             ${[
-              ['状态', m.status === 'active' ? '已激活' : m.status === 'limited' ? '受限访问' : '待接受邀请'],
+              ['状态', m.status === 'limited' ? '受限访问' : '可用'],
               ['加入时间', m.at],
               ['可访问', m.role === '企业管理员' ? '全部项目与配置' : m.role === '服务顾问' ? '仅授权范围内的部署状态' : '助手与知识库问答'],
             ].map(([k, v]) => `<div class="row--between" style="padding:9px 0;border-bottom:1px solid var(--border)">
@@ -3899,7 +3919,7 @@
         </div>
         <div class="cfg-row" style="opacity:.6">
           <span class="avatar avatar--sq" style="background:#4A3A5E">拓</span>
-          <div class="cfg-row__body"><b>厦门拓洋贸易有限公司</b><span>无访问权限 · 需由该企业管理员邀请</span></div>
+          <div class="cfg-row__body"><b>厦门拓洋贸易有限公司</b><span>无访问权限 · 需由该企业管理员添加</span></div>
           <span style="color:var(--text-4);display:flex">${icon('lock')}</span>
         </div>
       </div>

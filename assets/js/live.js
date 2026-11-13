@@ -98,7 +98,11 @@
         }
       }
 
-      if (srv.members) S.members = srv.members;
+      if (srv.members) {
+        /* 老数据里 status: 'pending'（等一封永远不来的邮件）。
+         * 本地系统加进来就能用，统一归成 active，避免界面一直显示"待接受"。 */
+        S.members = srv.members.map((m) => ({ ...m, status: m.status === 'limited' ? 'limited' : 'active' }));
+      }
       if (srv.project) {
         Object.assign(S.project, {
           id: srv.project.id || S.project.id,
