@@ -139,7 +139,7 @@
 <div id="adApp" style="display:none">
 
 <header style="background:var(--sidebar);border-bottom:1px solid rgba(255,255,255,.07);position:sticky;top:0;z-index:50">
-  <div style="max-width:1320px;margin:0 auto;padding:0 26px;height:56px;display:flex;align-items:center;gap:14px">
+  <div class="ad-header__bar" style="max-width:1320px;margin:0 auto;padding:0 26px;height:56px;display:flex;align-items:center;gap:14px">
     <span class="logo-mark" style="background:linear-gradient(140deg,#123239,#0B191F);box-shadow:inset 0 0 0 1px rgba(63,211,194,.35)">
       <svg viewBox="0 0 24 24" fill="none" stroke="#3FD3C2" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 5.5h6a2.5 2.5 0 0 1 2.5 2.5v11a2 2 0 0 0-2-2H4z"/>
@@ -151,7 +151,7 @@
       <span style="font-size:10px;color:#5F757E;letter-spacing:.08em;text-transform:uppercase">服务商后台</span>
     </div>
 
-    <nav style="display:flex;gap:2px;margin-left:22px">
+    <nav class="ad-header__nav" style="display:flex;gap:2px;margin-left:22px">
       <a href="#top" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:#fff;background:rgba(0,160,147,.16);font-weight:520">总览</a>
       <a href="#clients" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">客户</a>
       <a href="#projects" style="padding:6px 11px;border-radius:7px;font-size:12.5px;color:var(--sidebar-text)">项目</a>
@@ -285,6 +285,7 @@
 
 <script src="assets/js/data.js"></script>
 <script src="assets/js/api.js"></script>
+<script src="assets/js/responsive.js"></script>
 <script>
 (function () {
   const { qi, qa, icon, esc, toast, modal, loadAdmin, saveAdmin, createClient, enterClient,

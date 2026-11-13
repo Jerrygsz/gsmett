@@ -338,6 +338,7 @@ table{border-collapse:collapse;width:100%}
 .row--between{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .stack{display:flex;flex-direction:column}
 .grid{display:grid;gap:16px}
+.portal-grid{grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -953,4 +954,38 @@ table{border-collapse:collapse;width:100%}
   .topbar__search{display:none}
   .page-head{flex-direction:column}
   .modal{max-width:100%}
+}
+
+/* ==========================================================================
+   表格横向滚动容器：移动端表格不再撑破页面
+   ========================================================================== */
+.table-scroll{
+  width:100%;
+  max-width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.table-scroll>.table{width:100%}
+
+/* ==========================================================================
+   后台 / 通用 移动端深度适配（≤760px）
+   ========================================================================== */
+@media (max-width:760px){
+  /* 顶部导航条：换行 + 导航标签可横向滑动，避免被截断 */
+  .ad-header__bar{flex-wrap:wrap !important;height:auto !important;padding:10px 14px !important;gap:10px !important}
+  .ad-header__bar>div[style*="flex:1"]{display:none}
+  .ad-header__nav{overflow-x:auto !important;margin-left:0 !important;flex-wrap:nowrap !important;-webkit-overflow-scrolling:touch}
+  .ad-header__nav a{white-space:nowrap}
+
+  /* 减少空状态过大的留白 */
+  .empty{min-height:auto !important;padding:22px 14px !important}
+  .kanban__col .empty{padding:14px !important}
+  .kanban__col{min-width:0}
+
+  /* 列表行在窄屏允许换行，避免按钮贴边/重叠 */
+  .member-row,.staff-row{flex-wrap:wrap}
+  .row--between{flex-wrap:wrap;gap:8px}
+
+  /* 门户双栏布局在窄屏堆叠为单栏，避免左栏被压成竖条 */
+  .portal-grid{grid-template-columns:1fr;gap:14px}
 }

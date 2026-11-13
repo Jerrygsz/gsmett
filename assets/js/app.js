@@ -3832,7 +3832,7 @@
       ${pageHead('员工门户', '这是你团队员工看到的界面。他们不需要理解知识库、切片、模型，只需要问问题。',
         `<button class="btn btn--ghost btn--sm" id="btnCopyLink">${icon('external')} 复制门户链接</button>`)}
 
-      <div class="grid" style="grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start">
+      <div class="grid portal-grid">
         <div class="portal-chat">
           <div class="portal-chat__head">
             <span style="width:30px;height:30px;border-radius:8px;background:var(--brand-50);color:var(--brand);display:grid;place-items:center">${icon('bot')}</span>
