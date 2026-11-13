@@ -998,7 +998,7 @@
     };
 
     const cfg = (window.LIVE && window.LIVE.llm) || {};
-    line('dim', `当前配置：${cfg.provider || '-'} / ${cfg.model || '-'} / ${cfg.keyMasked || '-'}${cfg.source === 'platform' ? '（平台内置）' : ''}`);
+    line('dim', `当前配置：${cfg.provider || '-'} / ${cfg.model || '-'} / ${cfg.keyMasked || '-'}`);
 
     try {
       const r = await window.LIVE.testLlm();
@@ -2570,36 +2570,61 @@
   }
 
   /* 模型配置表单：第 5 步和配置中心共用 */
+  /* 表单里可选的服务商（换选项会自动填好接口与模型） */
+  const LLM_PROVIDERS = [
+    ['deepseek', 'DeepSeek', 'deepseek-chat'],
+    ['dashscope', '通义千问', 'qwen-plus'],
+    ['zhipu', '智谱 GLM', 'glm-4-plus'],
+    ['moonshot', '月之暗面', 'moonshot-v1-8k'],
+    ['openai', 'OpenAI', 'gpt-4o-mini'],
+    ['siliconflow', '硅基流动', 'deepseek-ai/DeepSeek-V3'],
+    ['custom', '自定义（OpenAI 兼容）', ''],
+  ];
+
+  /* 提供免费额度的服务商：客户任选其一注册，拿到属于「自己」的免费 Key。
+   * 平台不内置任何 Key，也不会替客户付费——所以这里给的是"去哪里白嫖一个自己的 Key"。 */
+  const FREE_PROVIDERS = [
+    { key: 'deepseek', name: 'DeepSeek', signup: 'https://platform.deepseek.com', note: '新用户注册送约 ¥10 体验额度，之后按量计费', base: 'https://api.deepseek.com', model: 'deepseek-chat' },
+    { key: 'siliconflow', name: '硅基流动 SiliconFlow', signup: 'https://cloud.siliconflow.cn', note: '注册送 ¥14 额度，可调用 DeepSeek / Qwen / GLM 等', base: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3' },
+    { key: 'dashscope', name: '阿里云百炼 · 通义千问', signup: 'https://dashscope.console.aliyun.com', note: '部分模型（如 qwen-long）长期免费额度', base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+    { key: 'zhipu', name: '智谱 AI · GLM', signup: 'https://open.bigmodel.cn', note: 'GLM 有免费版 / 体验额度', base: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus' },
+    { key: 'moonshot', name: '月之暗面 · Kimi', signup: 'https://platform.moonshot.cn', note: '注册送体验额度', base: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  ];
+
   function llmForm(compact) {
     const cfg = (window.LIVE && window.LIVE.llm) || { configured: false };
-    const isPlatform = !!cfg.configured && cfg.source === 'platform';
-    const providers = [
-      ['deepseek', 'DeepSeek', 'deepseek-chat'],
-      ['dashscope', '通义千问', 'qwen-plus'],
-      ['zhipu', '智谱 GLM', 'glm-4-plus'],
-      ['moonshot', '月之暗面', 'moonshot-v1-8k'],
-      ['openai', 'OpenAI', 'gpt-4o-mini'],
-      ['custom', '自定义（OpenAI 兼容）', ''],
-    ];
+    const configured = !!cfg.configured;
+    const providers = LLM_PROVIDERS;
 
     return `<div class="card" style="padding:16px;background:var(--surface-2);box-shadow:none">
-      ${cfg.configured ? `
+      ${configured ? `
         <div class="row--between mb12">
           <div class="row" style="gap:8px">
             <span style="color:var(--success);display:flex">${icon('checkCircle')}</span>
             <div>
-              <b class="fs12">${isPlatform ? '平台已内置模型' : '已配置'}：${esc(cfg.model)}</b>
-              <div class="fs11 muted mt2">${isPlatform
-                ? `密钥 ${esc(cfg.keyMasked)} · 由平台统一提供，出题和回答都已可用，不用自己填`
-                : `密钥 ${esc(cfg.keyMasked)} · 存在本机，不上传`}</div>
+              <b class="fs12">已配置：${esc(cfg.model)}</b>
+              <div class="fs11 muted mt2">密钥 ${esc(cfg.keyMasked)} · 保存在本机，不上传</div>
             </div>
           </div>
-          <button class="btn btn--quiet btn--sm" id="btnLlmEdit">${icon('edit')} ${isPlatform ? '改用我自己的 Key' : '修改'}</button>
+          <button class="btn btn--quiet btn--sm" id="btnLlmEdit">${icon('edit')} 修改</button>
         </div>` : `
-        <div class="note note--warn mb12">${icon('key')}<span>还没有配置模型。没有模型，第 7 步出不了测试题，员工门户也只能返回原文片段、给不出回答。</span></div>`}
+        <div class="note mb12">${icon('key')}<span><b>本平台不内置任何模型，也不会替你付费。</b>请填你自己的 API Key（任何一个支持 OpenAI 兼容接口的模型都行）。没有模型，第 7 步出不了题，员工门户也只能返回原文片段、给不出回答。</span></div>`}
 
       <div id="llmFormBox" style="${cfg.configured && compact ? 'display:none' : ''}">
-        ${isPlatform ? `<div class="fs11 muted mb12">当前用的是平台内置 Key（${esc(cfg.keyMasked)}）。如果贵司有自己的账号，可以在下面换成自己的，费用走自己的额度；不填就继续用平台的。</div>` : ''}
+        <div class="fs12 b5 mb8">① 选一个提供商，拿到你<b>自己</b>的免费 Key</div>
+        <div class="grid g2" style="gap:8px;margin-bottom:16px">
+          ${FREE_PROVIDERS.map((p) => `
+            <div class="card" style="padding:10px 12px;box-shadow:none;background:var(--surface);display:flex;flex-direction:column;gap:6px">
+              <div class="row--between">
+                <b class="fs12">${esc(p.name)}</b>
+                <button class="btn btn--ghost btn--xs" data-fp="1" data-prov="${p.key}" data-base="${esc(p.base)}" data-model="${esc(p.model)}">填入</button>
+              </div>
+              <div class="fs11 muted" style="line-height:1.45">${esc(p.note)}</div>
+              <a href="${p.signup}" target="_blank" rel="noopener" class="fs11" style="color:var(--brand)">去申请免费 Key ↗</a>
+            </div>`).join('')}
+        </div>
+
+        <div class="fs12 b5 mb8">② 填好下面三项，保存时系统会真的发一次请求验证</div>
         <div class="grid g2" style="gap:12px">
           <div class="field"><label class="field__label">服务商</label>
             <select class="select" id="llmProvider">
@@ -2615,8 +2640,8 @@
         </div>
         <div class="field">
           <label class="field__label">API Key</label>
-          <input class="input mono" id="llmKey" type="password" placeholder="${cfg.configured ? '已保存，如需更换请重新填写' : 'sk-...'}" autocomplete="new-password">
-          <div class="field__hint">在服务商后台创建。Key 保存在本机 data 目录，只用于调用模型，不会写进网页代码。</div>
+          <input class="input mono" id="llmKey" type="password" placeholder="${cfg.configured ? '已保存，如需更换请重新填写' : 'sk-... / 各平台自己的格式'}" autocomplete="new-password">
+          <div class="field__hint">在上面的提供商后台创建。Key 保存在本机 data 目录，只用于调用模型，不会写进网页代码，平台也看不到。</div>
         </div>
         <div class="row mt12">
           <button class="btn btn--primary btn--sm" id="btnLlmSave">${icon('zap')} 保存并测试连通</button>
@@ -2643,6 +2668,7 @@
         zhipu: ['https://open.bigmodel.cn/api/paas/v4', 'glm-4-plus'],
         moonshot: ['https://api.moonshot.cn/v1', 'moonshot-v1-8k'],
         openai: ['https://api.openai.com/v1', 'gpt-4o-mini'],
+        siliconflow: ['https://api.siliconflow.cn/v1', 'deepseek-ai/DeepSeek-V3'],
       };
       const v = map[sel.value];
       if (v) {
@@ -2650,6 +2676,20 @@
         qi('#llmModel').value = v[1];
       }
     };
+
+    // 免费提供商卡片的"填入"：自动填好接口与模型，剩下的 Key 自己申请粘贴
+    document.querySelectorAll('#llmFormBox [data-fp]').forEach((btn) => {
+      btn.onclick = () => {
+        const prov = btn.dataset.prov;
+        const match = LLM_PROVIDERS.find(([k]) => k === prov);
+        if (sel) sel.value = match ? prov : 'custom';
+        qi('#llmBase').value = btn.dataset.base;
+        qi('#llmModel').value = btn.dataset.model;
+        const box = qi('#llmFormBox');
+        if (box) box.style.display = '';
+        toast(`已填入 ${btn.closest('.card').querySelector('b')?.textContent || '该提供商'} 的接口和模型，去申请 Key 后粘贴即可`);
+      };
+    });
 
     const save = qi('#btnLlmSave');
     if (!save) return;
@@ -2662,12 +2702,7 @@
       };
       if (!cfg.model) return toast('先填模型名称', 'warn');
       const cur = window.LIVE.llm || {};
-      if (!cfg.apiKey) {
-        if (cur.source === 'platform') {
-          return toast('现在用的是平台内置 Key，已经能用了。要换成自己的账号，请先填写 Key', 'warn');
-        }
-        if (!cur.configured) return toast('先填 API Key', 'warn');
-      }
+      if (!cfg.apiKey && !cur.configured) return toast('先填 API Key（平台不内置，需自备）', 'warn');
 
       const box = qi('#llmResult');
       save.disabled = true;
@@ -3041,14 +3076,12 @@
      * 向量化模型」「DeepSeek-V3 备用」和「482 次 / 1.24M token / ¥5.12」，
      * 全是编的——实际只接了一个模型，也没有向量检索。 */
     const llm = (window.LIVE && window.LIVE.llm) || {};
-    const platform = llm.platform || {};
     const u = S.usage || { calls: 0, tokens: 0, byDay: {} };
     const byDay = u.byDay || {};
     const days = Object.keys(byDay).sort().slice(-7);
     const peak = Math.max(1, ...days.map((d) => byDay[d] || 0));
 
     const configured = llm.configured || llm.keyMasked;
-    const fromPlatform = llm.source === 'platform' || (!llm.configured && platform.available);
 
     return `
       <div class="grid g2" style="align-items:start;gap:18px">
@@ -3065,14 +3098,12 @@
             <div class="cfg-row">
               <span class="cfg-row__ico" style="background:var(--brand-50);color:var(--brand)">${icon('cpu')}</span>
               <div class="cfg-row__body">
-                <b>${esc(llm.provider || platform.provider || '—')} · ${esc(llm.model || platform.model || '—')}</b>
-                <span>${esc((llm.baseURL || platform.baseURL || '').replace(/^https?:\/\//, ''))} · 密钥 ${esc(llm.keyMasked || platform.keyMasked || '已配置')}</span>
+                <b>${esc(llm.provider || '—')} · ${esc(llm.model || '—')}</b>
+                <span>${esc((llm.baseURL || '').replace(/^https?:\/\//, ''))} · 密钥 ${esc(llm.keyMasked || '已配置')}</span>
               </div>
               <span class="badge badge--success badge--dot">可用</span>
             </div>
-            <div class="note mt16">${icon('info')}<span>${fromPlatform
-              ? '当前用的是平台内置 Key，所有客户共用。填自己的 Key 后优先级更高，费用记在自己账号上。'
-              : '当前用的是你填的 Key，费用记在你自己的服务商账号上。'}</span></div>
+            <div class="note mt16">${icon('info')}<span>当前用的是你填的 Key，费用记在你自己的服务商账号上。本平台不内置、也不补贴任何模型。</span></div>
           ` : `
             <div class="note note--warn">${icon('key')}<span>还没有配置模型。到项目向导第 5 步填一个 API Key，第 7 步才能出题、员工门户才能给出回答。</span></div>
           `}
@@ -3120,10 +3151,8 @@
     /* 只读展示真实配置。改 Key 统一走第 5 步，那里有真的连通性测试。
      * 以前这里放了个假的明文 Key 和"最后校验 2026-11-12 14:22"。 */
     const llm = (window.LIVE && window.LIVE.llm) || {};
-    const platform = llm.platform || {};
-    const configured = !!(llm.configured || platform.available);
-    const masked = llm.keyMasked || platform.keyMasked || '';
-    const fromPlatform = llm.source === 'platform' || (!llm.configured && platform.available);
+    const configured = !!llm.configured;
+    const masked = llm.keyMasked || '';
 
     return `
       <div class="grid g2" style="align-items:start;gap:18px">
@@ -3136,11 +3165,11 @@
           ${configured ? `
             <div class="stack" style="gap:0">
               ${[
-                ['服务商', `${llm.provider || platform.provider || '—'}`],
-                ['模型', `${llm.model || platform.model || '—'}`],
-                ['接口地址', (llm.baseURL || platform.baseURL || '—').replace(/^https?:\/\//, '')],
+                ['服务商', `${llm.provider || '—'}`],
+                ['模型', `${llm.model || '—'}`],
+                ['接口地址', (llm.baseURL || '—').replace(/^https?:\/\//, '')],
                 ['API 密钥', masked || '已配置'],
-                ['密钥来源', fromPlatform ? '平台内置（所有客户共用）' : '本企业自己配置'],
+                ['密钥来源', '本企业自己配置'],
               ].map(([k, v]) => `
                 <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:14px">
                   <span class="fs12 muted">${k}</span><span class="fs12 b5 mono">${esc(v)}</span>

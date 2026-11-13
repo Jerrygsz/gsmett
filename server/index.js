@@ -183,8 +183,9 @@ function maskKey(k) {
 }
 
 /* ---------------- 模型配置解析 ----------------
- * 两层：客户自己填的 Key 优先；没填就用平台内置的（管理员在 data/config.json 里配一次，
- * 所有客户共用，方便先跑通）。浏览器的任何请求都不会拿到明文 Key。
+ * 平台不内置、也不补贴任何模型：客户必须自己填 API Key（任何一个 OpenAI 兼容接口都行）。
+ * 管理员可在 data/config.json 里「可选」配置一个平台默认 Key，但它不会自动补贴客户——
+ * 客户请求一律用自己的 Key，平台 Key 只是管理员自检用途。浏览器任何请求都拿不到明文 Key。
  */
 function platformLLM() {
   const l = getConfig().llm;
@@ -192,10 +193,9 @@ function platformLLM() {
 }
 
 function effectiveLLM(st) {
+  // 只用客户自己填的 Key；平台不提供兜底 Key（避免用平台账号替客户付费）
   const own = st?.cfg?.llm;
-  if (own && own.apiKey) return { ...own, source: 'client' };
-  const p = platformLLM();
-  return p ? { ...p, source: 'platform' } : null;
+  return own && own.apiKey ? { ...own, source: 'client' } : null;
 }
 
 /* 资料分类：老数据没存 cat，按文件名推断，规则和前端保持一致 */
@@ -811,7 +811,7 @@ async function route(req, res, url) {
     });
   }
 
-  /* --- 平台内置模型配置（管理员用，Key 只在服务端） --- */
+  /* --- 平台默认模型配置（可选；不会自动补贴客户，仅供管理员自检连通性） --- */
   if (p === '/api/platform/llm' && method === 'GET') {
     const l = platformLLM();
     return sendJSON(res, 200, l
@@ -925,7 +925,7 @@ async function route(req, res, url) {
       baseURL: eff?.baseURL || null,
       model: eff?.model || null,
       keyMasked: maskKey(eff?.apiKey),
-      source: eff?.source || null,          // client = 客户自己的 Key，platform = 平台内置
+      source: eff?.source || null,          // client = 客户自己的 Key（平台不补贴，故不会是 platform）
       own: own ? { provider: own.provider, model: own.model, keyMasked: maskKey(own.apiKey) } : null,
       platform: plat
         ? { available: true, provider: plat.provider, model: plat.model, keyMasked: maskKey(plat.apiKey) }
