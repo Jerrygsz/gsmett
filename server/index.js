@@ -355,8 +355,12 @@ const SCAN_SKIP_DIRS = new Set([
   '$recycle.bin', 'system volume information', '.trash', '.venv', 'venv',
   'windows', 'program files', 'program files (x86)', 'programdata', 'appdata',
   'dist', 'build', '.cache', 'temp', 'tmp',
+  /* 系统与开发工具目录：扫「整个电脑」时不该把这些当企业资料 */
+  '$windows.~bt', '$windows.~ws', 'perflogs', 'recovery', 'msocache', 'config.msi',
+  'scoop', '.workbuddy', 'workbuddy', 'anaconda3', 'miniconda3', 'conda-meta',
+  'site-packages', 'node_modules_cache', '.npm', '.yarn', '.pnpm-store', '.gradle', '.m2',
+  'crashpad', 'gpucache', 'code cache', 'extensions',
 ]);
-
 const SCAN_MAX_FILES = 3000;   // 单次扫描上限，防止扫整个盘扫到卡死
 const SCAN_MAX_DEPTH = 12;
 
