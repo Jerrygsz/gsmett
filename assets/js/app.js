@@ -1549,10 +1549,18 @@
         </div>
         ${live ? `
           <div class="row" style="gap:8px;flex-wrap:wrap">
-            <input class="input" id="folderInput" style="flex:1;min-width:180px" placeholder="例如 D:/产品资料 或 C:/Users/你/Desktop/资料">
+            <input class="input" id="folderInput" style="flex:1;min-width:180px" placeholder="直接说：桌面、下载文件夹、D盘的公司资料">
             <button class="btn btn--primary" id="btnAddFolder">添加并扫描</button>
           </div>
-          <div class="fs11 muted mt8" style="line-height:1.6">支持绝对路径（正斜杠或反斜杠都行），多个用分号 ; 或换行分隔。会递归扫描 PDF / Word / Excel / TXT / Markdown / CSV，自动跳过系统目录和隐藏文件。文件只在本机读取，不上传云端。</div>
+          <div class="say-chips" id="sayChips">
+            <span class="say-chips__label">试试：</span>
+            <button type="button" class="say-chip" data-say="桌面">桌面</button>
+            <button type="button" class="say-chip" data-say="下载文件夹">下载</button>
+            <button type="button" class="say-chip" data-say="文档">文档</button>
+            <span id="sayChipsDrives"></span>
+            <button type="button" class="say-chip" data-say="整个电脑">整个电脑</button>
+          </div>
+          <div class="fs11 muted mt8" style="line-height:1.6">说个名字就行：桌面 / 下载 / 文档 / D盘 / D盘的公司资料，多个用逗号或换行分开。会按这台电脑的真实硬盘解析路径，递归扫描 PDF / Word / Excel / TXT / Markdown / CSV，跳过系统目录，文件只在本机读取。</div>
           ${folders.length ? `
             <div class="stack mt12" style="gap:8px" id="folderList">
               ${folders.map(folderRow).join('')}
@@ -1596,12 +1604,19 @@
     `;
   }
 
+  /* 路径显示：允许在目录分隔符处换行，避免把单词从中间截断 */
+  function pathHtml(p) {
+    return esc(p).replace(/[\\/]/g, m => m + '<wbr>');
+  }
+
   function folderRow(f) {
     const when = f.lastScanAt ? f.lastScanAt.slice(0, 16).replace('T', ' ') : '还没扫描';
+    const label = f.label || f.path.split(/[\\/]/).filter(Boolean).pop() || f.path;
     return `<div class="folder-item">
       <div class="folder-item__path">
-        <div class="fs12 b5">${esc(f.path)}</div>
-        <div class="fs11 muted">${f.imported || 0} 份已入库${f.count ? ` · 共发现 ${f.count} 个文档` : ''} · ${when}</div>
+        <div class="fs12 b5">${esc(label)}</div>
+        <div class="fs11 muted mono" style="overflow-wrap:anywhere">${pathHtml(f.path)}</div>
+        <div class="fs11 muted" style="margin-top:2px">${f.imported || 0} 份已入库${f.count ? ` · 共发现 ${f.count} 个文档` : ''} · ${when}</div>
       </div>
       <div class="row" style="gap:6px;flex:0 0 auto">
         <button class="btn btn--ghost btn--sm" data-rescan="${esc(f.path)}">重新扫描</button>
@@ -1633,27 +1648,144 @@
     const btnAdd = qi('#btnAddFolder');
     if (btnAdd) {
       const folderInput = qi('#folderInput');
+
+      /* 快捷词：桌面 / 下载 / 文档 / 各磁盘 / 整个电脑 */
+      function bindSayChips() {
+        qa('[data-say]').forEach(chip => {
+          chip.onclick = () => {
+            if (!folderInput) return;
+            folderInput.value = chip.dataset.say;
+            folderInput.focus();
+            if (btnAdd && !btnAdd.disabled) btnAdd.click();
+          };
+        });
+      }
+      bindSayChips();
+
+      /* 补上这台电脑真实存在的磁盘（C盘 / D盘 …） */
+      (async () => {
+        try {
+          const r = await window.LIVE.resolveDirs('');
+          const drives = r.drives || [];
+          const box = qi('#sayChipsDrives');
+          if (box && drives.length) {
+            box.innerHTML = drives.slice(0, 4).map(d => {
+              const letter = d.replace(/[\\/:]/g, '');
+              return `<button type="button" class="say-chip" data-say="${esc(letter + '盘')}">${esc(letter)} 盘</button>`;
+            }).join('');
+            bindSayChips();
+          }
+        } catch { /* 演示模式或服务未开，忽略 */ }
+      })();
+
+      /* 回显「说的话 → 真实路径」 */
+      function showResolved(items) {
+        const box = qi('#scanResult');
+        if (!box || !items || !items.length) return;
+        box.innerHTML = `<div class="fs11 muted mt10" style="line-height:1.7">已识别：${items.map(it =>
+          `<span class="say-resolved">${esc(it.raw)} → <b class="mono" style="overflow-wrap:anywhere">${pathHtml(it.path)}</b></span>`).join('')}</div>`;
+      }
+
+      /* 没找到：列出候选文件夹让人点选 */
+      function showUnmatched(res, raw) {
+        const box = qi('#scanResult');
+        if (!box) return;
+        const un = (res.unmatched || []).map(u => u.raw).join('、') || raw;
+        const cands = res.candidates || [];
+        box.innerHTML = `
+          <div class="note note--warn mt10">${icon('info')}<span>没找到「${esc(un)}」。${cands.length ? '你是指下面哪个？点一下就用它。' : '换个说法试试：桌面 / 下载 / D盘的公司资料，或直接贴完整路径。'}</span></div>
+          ${cands.length ? `<div class="say-chips">${cands.map(c => `<button type="button" class="say-chip" data-say="${esc(c.path)}">${esc(c.name)}</button>`).join('')}</div>` : ''}`;
+        bindSayChips();
+      }
+
+      /* 文档太多时先确认，别一按就吞掉几百份 */
+      function showConfirm(raw, items, total) {
+        const box = qi('#scanResult');
+        if (!box) return;
+        const names = items.map(i => i.label).join('、');
+        box.innerHTML = `
+          <div class="note note--warn mt10">${icon('info')}<span>「${esc(names)}」里找到 <b>${total}</b> 个可建库文档（含子目录）。全部导入要逐份解析，也占本机存储，确认一下？</span></div>
+          <div class="row mt8" style="gap:8px;flex-wrap:wrap">
+            <button class="btn btn--primary btn--sm" id="btnConfirmImport">确认导入 ${total} 份</button>
+            <button class="btn btn--ghost btn--sm" id="btnCancelImport">换个更具体的文件夹</button>
+          </div>`;
+        const ok = qi('#btnConfirmImport');
+        const no = qi('#btnCancelImport');
+        if (ok) ok.onclick = async () => {
+          ok.disabled = true; ok.textContent = '导入中…';
+          try { await runImport(raw, items); }
+          catch (e) { ok.disabled = false; ok.textContent = `确认导入 ${total} 份`; toast('导入失败：' + e.message, 'warn'); }
+        };
+        if (no) no.onclick = () => {
+          box.innerHTML = '';
+          const inp = qi('#folderInput');
+          if (inp) { inp.value = ''; inp.focus(); }
+        };
+      }
+
+      /* 真正加入并扫描（确认后走这里） */
+      async function runImport(raw, items) {
+        if (btnAdd.isConnected) btnAdd.textContent = '扫描中…';
+        const r = await window.LIVE.addFolders(raw);
+        if (r.badDirs && r.badDirs.length) toast(`这些没找到：${r.badDirs.slice(0, 2).join('、')}`, 'warn');
+        if (r.added && r.added.length) {
+          const imp = await window.LIVE.rescanFolders();
+          window.LIVE.paint(); TM.save(); syncDocChecks(step);
+          const nAdd = imp.added.length, nUp = imp.updated.length;
+          const rb = imp.rebuilt && imp.rebuilt.chunks ? ' · 知识库已重建' : '';
+          logAct(`扫描文件夹，导入 ${nAdd} 份资料`);
+          toast(nAdd || nUp ? `已导入 ${nAdd} 份${nUp ? `、更新 ${nUp} 份` : ''}资料${rb}` : '这个文件夹里暂时没有能建库的新文档', nAdd || nUp ? 'info' : 'warn');
+          folderInput.value = '';
+          renderStepPanel();
+          showResolved(items);
+        } else {
+          renderStepPanel();
+          toast('这个文件夹已在扫描列表里，可直接点「重新扫描」', 'warn');
+          showResolved(items);
+        }
+      }
+
       btnAdd.onclick = async () => {
         const raw = (folderInput.value || '').trim();
-        if (!raw) { toast('先填写要扫描的文件夹路径', 'warn'); return; }
+        if (!raw) { toast('先说要扫哪里，比如「桌面」', 'warn'); folderInput.focus(); return; }
         if (!(window.LIVE && window.LIVE.on)) { toast('扫描硬盘需要本地服务在运行', 'warn'); return; }
-        btnAdd.disabled = true; btnAdd.textContent = '扫描中…';
+        const reset = () => { btnAdd.disabled = false; btnAdd.textContent = '添加并扫描'; };
+        btnAdd.disabled = true; btnAdd.textContent = '识别中…';
         try {
-          const r = await window.LIVE.addFolders(raw);
-          if (r.badDirs && r.badDirs.length) toast(`这些路径不存在：${r.badDirs.slice(0, 2).join('、')}`, 'warn');
-          if (r.added && r.added.length) {
-            const imp = await window.LIVE.rescanFolders();
-            window.LIVE.paint(); TM.save(); syncDocChecks(step); renderStepPanel();
-            const nAdd = imp.added.length, nUp = imp.updated.length;
-            const rb = imp.rebuilt && imp.rebuilt.chunks ? ' · 知识库已重建' : '';
-            logAct(`扫描文件夹，导入 ${nAdd} 份资料`);
-            toast(nAdd || nUp ? `已导入 ${nAdd} 份${nUp ? `、更新 ${nUp} 份` : ''}资料${rb}` : '这个文件夹里暂时没有能建库的新文档', nAdd || nUp ? 'info' : 'warn');
-          } else {
-            renderStepPanel();
-            toast('这个文件夹已在扫描列表里，可直接点「重新扫描」', 'warn');
+          /* 1) 先把人话解析成真实路径，让用户确认扫的是哪里 */
+          const res = await window.LIVE.resolveDirs(raw);
+          const items = res.items || [];
+          if (!items.length) {
+            showUnmatched(res, raw);
+            reset();
+            toast('没找到这个文件夹，看看下面的候选', 'warn');
+            return;
           }
+
+          /* 2) 先数一数有多少份文档，大目录先确认 */
+          btnAdd.textContent = '统计中…';
+          let preview = null;
+          try { preview = await window.LIVE.scanDirs(raw); } catch { preview = null; }
+          const total = preview && typeof preview.total === 'number' ? preview.total : null;
+
+          if (total === 0) {
+            const box = qi('#scanResult');
+            if (box) box.innerHTML = `<div class="note note--warn mt10">${icon('info')}<span>「${esc(items.map(i => i.label).join('、'))}」里没找到能建库的文档（支持 PDF / Word / Excel / TXT / Markdown / CSV）。</span></div>`;
+            reset();
+            return;
+          }
+          if (total !== null && total > 60) {
+            showConfirm(raw, items, total);
+            reset();
+            return;
+          }
+
+          /* 3) 文档不多，直接导 */
+          await runImport(raw, items);
         } catch (e) {
-          btnAdd.disabled = false; btnAdd.textContent = '添加并扫描';
+          reset();
+          const data = e.data || {};
+          if (data.unmatched) showUnmatched(data, raw);
           toast('扫描失败：' + e.message, 'warn');
         }
       };

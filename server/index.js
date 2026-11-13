@@ -370,10 +370,235 @@ function normAbs(p) {
   return path.resolve(String(p || '').trim());
 }
 
-/* 多个路径：支持数组，或「分号/换行」分隔的字符串 */
+/* 多个路径：支持数组，或「分号/换行/逗号/顿号」分隔的字符串 */
 function normalizeDirs(v) {
-  const arr = Array.isArray(v) ? v : (typeof v === 'string' ? v.split(/[\n;]+/) : []);
+  const arr = Array.isArray(v) ? v : (typeof v === 'string' ? v.split(/[\n;；，、]+|,\s+/) : []);
   return [...new Set(arr.map((s) => String(s || '').trim()).filter(Boolean))];
+}
+
+/* ---------------- 把「人话」翻译成真实文件夹 ----------------
+ * 用户可以直接说「扫描桌面」「扫描 D 盘的公司资料」「下载文件夹」，
+ * 这里翻译成本机真实存在的绝对路径。全部基于真实文件系统探测，不是猜。
+ */
+
+const HOME_DIR = os.homedir();
+
+/* 常见中文叫法 → 用户目录下的真实子目录（按顺序取第一个存在的） */
+const DIR_ALIASES = [
+  { keys: ['桌面', '电脑桌面'], subs: ['Desktop', '桌面'] },
+  { keys: ['下载', '下载文件夹', '下载目录'], subs: ['Downloads', '下载'] },
+  { keys: ['文档', '我的文档', '文档文件夹', '我的文件'], subs: ['Documents', '文档'] },
+  { keys: ['图片', '照片', '相册'], subs: ['Pictures', '图片'] },
+  { keys: ['视频'], subs: ['Videos', '视频'] },
+  { keys: ['音乐'], subs: ['Music', '音乐'] },
+  { keys: ['用户目录', '主目录', '个人目录', '家目录'], subs: [''] },
+  { keys: ['微信文件', '微信文件夹', '微信接收文件'], subs: ['Documents/WeChat Files', 'Documents/xwechat_files', 'Desktop/WeChat Files'] },
+];
+
+function existsDir(p) {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+/* 去掉礼貌语、动词、量词尾巴，把「扫描一下桌面这个文件夹」压成「桌面」 */
+function cleanPhrase(s) {
+  let t = String(s || '').trim().replace(/^[「『"'“”‘’《》]+|[」』"'“”‘’《》]+$/g, '').trim();
+  t = t.replace(/^(请问|请|麻烦|帮我|帮忙|我想要|我要|我想|需要|能不能|可以|把|从|扫描一下|扫描下|扫描|扫一下|扫下|扫|添加|导入|读取|加载|收录|整理|加上|加入|看看|看下)+/g, '');
+  t = t.replace(/(这个|那个|这些|那些)/g, '');
+  t = t.replace(/(文件夹|资料夹|目录)$/g, '');
+  return t.trim();
+}
+
+/* 去掉「的 / 上的 / 里的 / 中的 / 下面的」这类连接语
+ * 注意：只在连接词后面确实跟着「的/里/中」时才剥，避免把「上海分公司」剥成「海分公司」 */
+function stripLink(s) {
+  let t = String(s || '').trim();
+  for (let i = 0; i < 3; i++) {
+    const before = t;
+    t = t.replace(/^(?:的|之)\s*/, '');
+    t = t.replace(/^(?:上面|上|里面|里边|里|中间|中|下面|下|内部|内)\s*(?:的|里|中)\s*/, '');
+    t = t.replace(/^[\/\\]+/, '');
+    if (t === before) break;
+  }
+  return t.trim();
+}
+
+function normName(s) {
+  return String(s || '').toLowerCase().replace(/[\s_\-·.．（）()【】\[\]《》]+/g, '');
+}
+
+/* 名称匹配打分：完全一致 > 前缀 > 包含 > 被包含 */
+function matchScore(name, query) {
+  const n = normName(name), k = normName(query);
+  if (n && k) {
+    if (n === k) return 100;
+    if (n.startsWith(k)) return 88;
+    if (n.includes(k)) return 74;
+    if (k.includes(n) && n.length >= 2) return 62;
+  }
+  // 多词（「公司 资料」）全部命中才算
+  const parts = String(query).split(/[\s+＋]+/).map(normName).filter(Boolean);
+  if (parts.length > 1 && parts.every((p) => n.includes(p))) return 66;
+  return 0;
+}
+
+function listSubDirs(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SCAN_SKIP_DIRS.has(e.name.toLowerCase()))
+      .map((e) => path.join(dir, e.name));
+  } catch { return []; }
+}
+
+function listDrives() {
+  if (process.platform !== 'win32') return ['/'];
+  const out = [];
+  for (let c = 67; c <= 90; c++) { // C: - Z:
+    const root = String.fromCharCode(c) + ':\\';
+    if (existsDir(root)) out.push(root);
+  }
+  return out;
+}
+
+/* 在给定根目录下浅层（默认 2 层）按名字找文件夹 */
+function fuzzyFindDir(query, { roots = null, depth = 2, budgetMs = 2500, limit = 6 } = {}) {
+  const deadline = Date.now() + budgetMs;
+  const scopes = roots && roots.length ? roots : [
+    path.join(HOME_DIR, 'Desktop'),
+    path.join(HOME_DIR, 'Documents'),
+    path.join(HOME_DIR, 'Downloads'),
+    HOME_DIR,
+    ...listDrives(),
+  ];
+  const hits = [];
+  const seen = new Set();
+  const queue = scopes.map((d) => ({ dir: d, level: 0 }));
+  while (queue.length && Date.now() < deadline) {
+    const { dir, level } = queue.shift();
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    for (const full of listSubDirs(dir)) {
+      if (Date.now() > deadline) break;
+      const score = matchScore(path.basename(full), query);
+      if (score) hits.push({ path: full, name: path.basename(full), score, parent: dir });
+      if (level + 1 < depth) queue.push({ dir: full, level: level + 1 });
+    }
+  }
+  hits.sort((a, b) => b.score - a.score || a.path.length - b.path.length);
+  return hits.slice(0, limit);
+}
+
+/* 单个短语 → { path, how, label } 或 { path:null, what, candidates } */
+async function resolveDirPhrase(raw) {
+  const original = String(raw || '').trim();
+  if (!original) return { raw: original, path: null, what: '空输入' };
+
+  /* 1) 本身就是一个真实存在的路径 */
+  const abs = normAbs(original);
+  if (existsDir(abs)) {
+    return { raw: original, path: abs, how: 'path', label: path.basename(abs) || abs };
+  }
+
+  const t = cleanPhrase(original);
+  if (!t) return { raw: original, path: null, what: '没说要扫哪里' };
+
+  /* 2) 整台电脑 / 所有盘 */
+  if (/^(整个?电脑|全盘|所有盘|每个盘|各个盘|所有硬盘)$/.test(t)) {
+    const drives = listDrives();
+    if (drives.length) return { raw: original, path: drives, how: 'all-drives', label: '所有磁盘', wholeDrive: true };
+  }
+
+  /* 3) 盘符：D盘 / D: / D盘的公司资料 / D 盘 报价单 */
+  const dm = t.match(/^([a-zA-Z])\s*(?:盘|:|：)\s*(.*)$/);
+  if (dm) {
+    const letter = dm[1].toUpperCase();
+    const root = letter + ':\\';
+    const rest = stripLink(dm[2]).replace(/[\/\\]+$/, '');
+    if (!existsDir(root)) {
+      return { raw: original, path: null, what: `这台电脑上没有 ${letter} 盘` };
+    }
+    if (!rest) {
+      return { raw: original, path: root, how: 'drive-root', label: `${letter} 盘`, wholeDrive: true };
+    }
+    const direct = path.join(root, rest);
+    if (existsDir(direct)) {
+      return { raw: original, path: direct, how: 'drive', label: rest };
+    }
+    const hits = fuzzyFindDir(rest, { roots: [root], depth: 2 });
+    if (hits.length) {
+      return { raw: original, path: hits[0].path, how: 'fuzzy', label: hits[0].name, candidates: hits };
+    }
+    return { raw: original, path: null, what: `${letter} 盘里没找到「${rest}」`, candidates: listSubDirs(root).slice(0, 8).map((p) => ({ path: p, name: path.basename(p), score: 0 })) };
+  }
+
+  /* 4) 常见别名：桌面 / 下载 / 文档 …（可带子路径，如「桌面上的报价资料」） */
+  for (const alias of DIR_ALIASES) {
+    for (const key of alias.keys) {
+      if (t !== key && !t.startsWith(key)) continue;
+      let base = null;
+      for (const sub of alias.subs) {
+        const cand = sub ? path.join(HOME_DIR, sub) : HOME_DIR;
+        if (existsDir(cand)) { base = cand; break; }
+      }
+      if (!base) continue;
+      const rest = stripLink(t.slice(key.length)).replace(/[\/\\]+$/, '');
+      if (!rest) return { raw: original, path: base, how: 'alias', label: key };
+      const direct = path.join(base, rest);
+      if (existsDir(direct)) return { raw: original, path: direct, how: 'alias', label: rest };
+      const hits = fuzzyFindDir(rest, { roots: [base], depth: 3 });
+      if (hits.length) return { raw: original, path: hits[0].path, how: 'fuzzy', label: hits[0].name, candidates: hits };
+      return { raw: original, path: null, what: `${key}里没找到「${rest}」`, candidates: listSubDirs(base).slice(0, 8).map((p) => ({ path: p, name: path.basename(p), score: 0 })) };
+    }
+  }
+
+  /* 5) 直接给一个文件夹名：在桌面/文档/下载/用户目录/各盘浅层里找 */
+  const hits = fuzzyFindDir(t, { depth: 3 });
+  if (hits.length) {
+    return { raw: original, path: hits[0].path, how: 'fuzzy', label: hits[0].name, candidates: hits };
+  }
+
+  return { raw: original, path: null, what: `没找到「${t}」这个文件夹`, candidates: [] };
+}
+
+/* 批量解析；失败时再尝试按「和 / 以及 / 还有」拆开，支持「桌面和下载文件夹」 */
+async function resolveDirInputs(v) {
+  const raws = normalizeDirs(v);
+  const items = [];
+  const unmatched = [];
+  const candidates = [];
+
+  const push = (res) => {
+    if (res.path) {
+      const list = Array.isArray(res.path) ? res.path : [res.path];
+      list.forEach((p, i) => items.push({
+        raw: res.raw, path: p,
+        label: list.length > 1 ? `${res.label}${i + 1}` : res.label,
+        how: res.how, wholeDrive: !!res.wholeDrive,
+      }));
+    } else {
+      unmatched.push({ raw: res.raw, reason: res.what || '没找到这个文件夹' });
+      (res.candidates || []).forEach((c) => candidates.push(c));
+    }
+  };
+
+  for (const raw of raws) {
+    let res = await resolveDirPhrase(raw);
+    if (!res.path && /[和及与]|还有|以及/.test(raw)) {
+      const parts = raw.split(/(?:以及|还有|和|及|与)/).map((s) => s.trim()).filter(Boolean);
+      if (parts.length > 1) {
+        const sub = await resolveDirInputs(parts);
+        sub.items.forEach((it) => items.push(it));
+        sub.unmatched.forEach((u) => unmatched.push(u));
+        sub.candidates.forEach((c) => candidates.push(c));
+        res = null;
+      }
+    }
+    if (res) push(res);
+  }
+
+  /* 去重（同一路径只保留一次） */
+  const seen = new Set();
+  const uniq = items.filter((it) => (seen.has(it.path) ? false : (seen.add(it.path), true)));
+  return { items: uniq, unmatched, candidates: candidates.slice(0, 8) };
 }
 
 /* 递归遍历一个文件夹，只收受支持的文档类型 */
@@ -903,26 +1128,40 @@ async function route(req, res, url) {
 
   /* --- 本地文件夹扫描 / 导入 --- */
 
+  /* 把「人话」翻译成真实路径，只探测不读写：前端用来回显「桌面 → C:\Users\xx\Desktop」 */
+  if (p === '/api/fs/resolve' && method === 'POST') {
+    const b = await readJSONBody(req);
+    const r = await resolveDirInputs(b.q !== undefined ? b.q : b.dirs);
+    return sendJSON(res, 200, {
+      ...r,
+      home: HOME_DIR,
+      drives: listDrives(),
+      shortcuts: ['桌面', '下载', '文档', 'D盘', '整个电脑'],
+    });
+  }
+
   /* 只扫描、不导入：先让用户看清楚发现了哪些文件 */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/scan$/)) && method === 'POST') {
     const id = m[1];
     requireClient(id);
     const b = await readJSONBody(req);
-    const dirs = normalizeDirs(b.dirs);
-    if (!dirs.length) return sendJSON(res, 400, { error: '请提供要扫描的文件夹路径' });
+    const { items, unmatched } = await resolveDirInputs(b.dirs);
+    if (!items.length) {
+      return sendJSON(res, 400, {
+        error: unmatched.length ? `没找到要扫描的文件夹：${unmatched.map((u) => u.raw).join('、')}` : '请提供要扫描的文件夹路径',
+        unmatched,
+      });
+    }
     const recursive = b.recursive !== false;
 
     const docs = getDocs(id);
     const importedSet = new Set(docs.filter((d) => d.sourcePath).map((d) => d.sourcePath));
     let all = [];
     let truncated = false;
-    const badDirs = [];
 
-    for (const d of dirs) {
-      const abs = normAbs(d);
-      let isDir = false;
-      try { isDir = fs.statSync(abs).isDirectory(); } catch { }
-      if (!isDir) { badDirs.push(d); continue; }
+    for (const it of items) {
+      const abs = it.path;
+      if (!existsDir(abs)) continue;
       const r = await walkDir(abs, { recursive });
       truncated = truncated || r.truncated;
       all = all.concat(r.files);
@@ -932,7 +1171,9 @@ async function route(req, res, url) {
       files: all.map((f) => ({ ...f, imported: importedSet.has(f.path), dirName: path.basename(f.dir) })),
       total: all.length,
       truncated,
-      badDirs,
+      badDirs: unmatched.map((u) => u.raw),
+      unmatched,
+      resolved: items.map((it) => ({ raw: it.raw, path: it.path, label: it.label, how: it.how, wholeDrive: it.wholeDrive })),
     });
   }
 
@@ -950,12 +1191,11 @@ async function route(req, res, url) {
         .filter((abs) => { try { return isSupported(abs) && fs.statSync(abs).isFile(); } catch { return false; } })
         .map((abs) => ({ path: abs, dir: path.dirname(abs) }));
     } else {
-      const dirs = normalizeDirs(b.dirs);
-      for (const d of dirs) {
-        const abs = normAbs(d);
-        let isDir = false;
-        try { isDir = fs.statSync(abs).isDirectory(); } catch { }
-        if (!isDir) { badDirs.push(d); continue; }
+      const { items, unmatched } = await resolveDirInputs(b.dirs);
+      unmatched.forEach((u) => badDirs.push(u.raw));
+      for (const it of items) {
+        const abs = it.path;
+        if (!existsDir(abs)) continue;
         const r = await walkDir(abs, { recursive: b.recursive !== false });
         entries = entries.concat(r.files.map((f) => ({ path: f.path, dir: abs })));
       }
@@ -993,26 +1233,35 @@ async function route(req, res, url) {
     const id = m[1];
     requireClient(id);
     const b = await readJSONBody(req);
-    const dirs = normalizeDirs(b.dirs);
-    if (!dirs.length) return sendJSON(res, 400, { error: '请提供文件夹路径' });
+    const { items, unmatched } = await resolveDirInputs(b.dirs);
+    if (!items.length) {
+      return sendJSON(res, 400, {
+        error: unmatched.length ? `没找到要扫描的文件夹：${unmatched.map((u) => u.raw).join('、')}` : '请提供文件夹路径',
+        unmatched,
+      });
+    }
 
     const folders = getFolders(id);
     const added = [];
     const badDirs = [];
-    for (const d of dirs) {
-      const abs = normAbs(d);
-      let isDir = false;
-      try { isDir = fs.statSync(abs).isDirectory(); } catch { }
-      if (!isDir) { badDirs.push(d); continue; }
+    for (const it of items) {
+      const abs = it.path;
+      if (!existsDir(abs)) { badDirs.push(it.raw); continue; }
       if (folders.some((f) => f.path === abs)) continue;
       folders.push({
-        path: abs, addedAt: new Date().toISOString(), lastScanAt: null,
+        path: abs, label: it.label || path.basename(abs) || abs,
+        addedAt: new Date().toISOString(), lastScanAt: null,
         imported: 0, count: 0, recursive: b.recursive !== false,
       });
       added.push(abs);
     }
     saveFolders(id, folders);
-    return sendJSON(res, 200, { folders, added, badDirs });
+    return sendJSON(res, 200, {
+      folders, added,
+      badDirs: badDirs.concat(unmatched.map((u) => u.raw)),
+      unmatched,
+      resolved: items.map((it) => ({ raw: it.raw, path: it.path, label: it.label, how: it.how, wholeDrive: it.wholeDrive })),
+    });
   }
 
   /* 移除文件夹（只取消自动扫描，已导入的资料仍在） */

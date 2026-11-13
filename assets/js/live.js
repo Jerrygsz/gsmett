@@ -272,9 +272,19 @@
 
     async addFolders(dirs, recursive) {
       const r = await API.addFolders(this.clientId, dirs, recursive);
-      if (r.error) throw new Error(r.error);
+      if (r.error) {
+        const e = new Error(r.error);
+        e.data = r;
+        throw e;
+      }
       this.foldersList = r.folders || [];
       return r;
+    },
+
+    /* 把「桌面」「D盘的公司资料」这类说法解析成真实路径（只探测，不扫描） */
+    async resolveDirs(q) {
+      const r = await API.resolveDirs(q);
+      return r || {};
     },
 
     async removeFolder(dir) {

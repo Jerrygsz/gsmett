@@ -100,6 +100,8 @@
     addFolders(id, dirs, recursive) { return this.post(`/api/clients/${id}/folders`, { dirs, recursive }); },
     removeFolder(id, dir) { return this.post(`/api/clients/${id}/folders/remove`, { dir }); },
     rescanFolders(id) { return this.post(`/api/clients/${id}/folders/rescan`, {}, { timeout: 600000 }); },
+    /* 人话 → 真实路径 */
+    resolveDirs(q) { return this.post('/api/fs/resolve', { q }, { timeout: 20000 }); },
 
     /* ---------- 知识库 ---------- */
     buildKb(id) { return this.post(`/api/clients/${id}/kb/build`, {}); },
