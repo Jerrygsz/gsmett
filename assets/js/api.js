@@ -92,6 +92,7 @@
     },
     deleteDoc(id, docId) { return this.del(`/api/clients/${id}/docs/${docId}`); },
     setDocCat(id, docId, cat) { return this.patch(`/api/clients/${id}/docs/${docId}`, { cat }); },
+    classifyDocs(id, body) { return this.post(`/api/clients/${id}/docs/classify`, body || {}, { timeout: 180000 }); },
 
     /* ---------- 本地文件夹扫描（真实读硬盘） ---------- */
     scan(id, dirs, recursive) { return this.post(`/api/clients/${id}/scan`, { dirs, recursive }, { timeout: 180000 }); },

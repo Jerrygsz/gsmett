@@ -1538,6 +1538,8 @@
     const total = files.reduce((a, f) => a + (f.bytes || 0), 0);
     const live = !!(window.LIVE && window.LIVE.on);
     const folders = (window.LIVE && window.LIVE.on ? window.LIVE.foldersList : null) || S.project.folders || [];
+    const pendingCat = files.filter(f => f.catSource !== 'ai' && f.catSource !== 'manual').length;
+    const aiDone = files.filter(f => f.catSource === 'ai').length;
 
     return `
       <div class="card card--pad mb16" id="scanCard">
@@ -1570,6 +1572,30 @@
             </div>` : `<div class="fs11 muted mt12">还没有添加文件夹。加上一个，扫描到的文档会直接出现在下面的资料列表里。</div>`}
           <div id="scanResult"></div>
         ` : `<div class="note note--info">${icon('info')}<span>扫描硬盘需要本地服务在运行（<span class="mono">node server/index.js</span> 或双击「启动服务.bat」）。当前是演示模式，只能手动添加文件。</span></div>`}
+      </div>
+
+      <div class="card card--pad mb16" id="aiCatCard">
+        <div class="ai-cat__head">
+          <div class="ai-cat__intro">
+            <b class="fs13">第二步：AI 分析分类</b>
+            <div class="fs11 muted" style="line-height:1.6;margin-top:2px">系统会读每份资料的正文内容（不只是文件名），判断它属于产品 / 销售 / 业务流程 / 售后哪一类，并给出判断依据。分类决定员工问问题时能不能检索到这份资料。</div>
+          </div>
+          <button class="btn ${pendingCat ? 'btn--primary' : 'btn--ghost'} btn--sm ai-cat__btn" id="btnAiCat" ${pendingCat ? '' : 'disabled'}>
+            ${pendingCat ? `分析 ${pendingCat} 份待分类资料` : (aiDone ? '已全部分析完成' : '暂无可分析资料')}
+          </button>
+        </div>
+        <div class="ai-cat__meta mt10">
+          ${TM.DOC_CATS.map(c => {
+            const n = files.filter(f => f.cat === c).length;
+            const ai = files.filter(f => f.cat === c && f.catSource === 'ai').length;
+            return `<span class="ai-cat__pill ${n ? 'is-on' : ''}">${c} <b>${n}</b>${ai ? `<i class="fs11 muted"> · AI ${ai}</i>` : ''}</span>`;
+          }).join('')}
+          <span class="ai-cat__pill ${pendingCat ? 'is-warn' : ''}">待分析 <b>${pendingCat}</b></span>
+        </div>
+        <div class="ai-cat__bar" id="aiCatBar" hidden><i></i></div>
+        <div class="fs11 muted mt8" id="aiCatStat" style="line-height:1.6">${pendingCat
+          ? '点上面的按钮开始。每批分析 10 份，中途可以离开这个页面，进度会停在这一批结束的位置。'
+          : '分类已全部由 AI 读过内容判定。手动改过的资料会保住你的选择，不会被 AI 覆盖。'}</div>
       </div>
 
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入资料文件">
@@ -1626,11 +1652,17 @@
   }
 
   function docRow(d) {
+    const tag = d.catSource === 'ai'
+      ? `<span class="doc-tag doc-tag--ai" title="AI 读过内容后判定">AI 判定</span>`
+      : d.catSource === 'manual'
+        ? `<span class="doc-tag doc-tag--man" title="你手动指定的分类，AI 不会覆盖">手动</span>`
+        : `<span class="doc-tag doc-tag--todo" title="只按文件名推断，建议用 AI 分析一次">待分析</span>`;
     return `<div class="doc-item" data-id="${esc(d.id)}">
       <span class="doc-item__ext">${esc(d.ext || 'FILE')}</span>
       <div class="doc-item__body">
-        <b>${esc(d.name)}</b>
+        <div class="doc-item__title"><b>${esc(d.name)}</b>${tag}</div>
         <span>${esc(d.size)}${d.slices ? ' · 约 ' + d.slices + ' 个切片' : ''}${d.state === 'ocr' ? ' · 已 OCR' : ''}${d.sourcePath ? ' · 文件夹导入' : ''}</span>
+        ${d.catSource === 'ai' && d.catWhy ? `<span class="doc-why">${icon('info')} ${esc(d.catWhy)}</span>` : ''}
       </div>
       <select class="select select--sm" data-cat="${esc(d.id)}" aria-label="资料分类">
         ${TM.DOC_CATS.map(c => `<option ${c === d.cat ? 'selected' : ''}>${c}</option>`).join('')}
@@ -1723,6 +1755,69 @@
         };
       }
 
+      /* ---- AI 分析分类 ---- */
+      const AI_BATCH = 10;
+
+      function aiUI() {
+        return { btn: qi('#btnAiCat'), bar: qi('#aiCatBar'), stat: qi('#aiCatStat') };
+      }
+
+      function aiProgress(cur, total, ok, fail) {
+        const { bar, stat } = aiUI();
+        if (bar) {
+          bar.hidden = false;
+          const fill = bar.firstElementChild;
+          if (fill) fill.style.width = Math.min(100, Math.round((cur / Math.max(total, 1)) * 100)) + '%';
+        }
+        if (stat) {
+          stat.textContent = `正在分析：已处理 ${cur} / ${total} 份${fail ? ` · ${fail} 份模型没给出结果，暂保留原判定` : ''}`;
+        }
+      }
+
+      async function aiClassify(ids) {
+        if (!(window.LIVE && window.LIVE.on)) { toast('需要本地服务在运行才能做 AI 分析', 'warn'); return; }
+        const queue = (ids && ids.length) ? ids.slice() : null;
+        const total = queue
+          ? queue.length
+          : (S.project.files || []).filter(f => f.catSource !== 'ai' && f.catSource !== 'manual').length;
+        if (!total) { toast('没有需要分析的资料', 'info'); return; }
+
+        const first = aiUI();
+        if (first.btn) { first.btn.disabled = true; first.btn.textContent = 'AI 分析中…'; }
+        aiProgress(0, total, 0, 0);
+
+        let ok = 0, fail = 0;
+        try {
+          for (let guard = 0; guard < 500; guard++) {
+            const batch = queue ? queue.slice(0, AI_BATCH) : null;
+            const r = await window.LIVE.classifyDocs(batch, AI_BATCH);
+            const nUp = (r.updated || []).length;
+            const nFail = (r.failed || []).length;
+            ok += nUp; fail += nFail;
+            if (queue) queue.splice(0, batch.length);
+            aiProgress(Math.min(ok + fail, total), total, ok, fail);
+
+            if (queue ? queue.length === 0 : !!r.done) break;
+            if (!nUp && !nFail) break;   // 模型连续不给结果，别死循环
+          }
+          window.LIVE.paint(); TM.save(); syncDocChecks(step);
+          renderStepPanel();
+          logAct(`AI 分析了 ${ok} 份资料的分类`);
+          toast(ok ? `AI 已按内容判定 ${ok} 份资料的分类` : 'AI 这次没给出结果，稍后再试', ok ? 'info' : 'warn');
+        } catch (e) {
+          const cur = aiUI();
+          if (cur.btn) { cur.btn.disabled = false; cur.btn.textContent = '重试 AI 分析'; }
+          if (e.data && e.data.needKey) {
+            toast('还没配置模型 Key，先去第 5 步填一个', 'warn');
+          } else {
+            toast(e.message || 'AI 分析失败', 'warn');
+          }
+        }
+      }
+
+      const btnAi = qi('#btnAiCat');
+      if (btnAi) btnAi.onclick = () => aiClassify(null);
+
       /* 真正加入并扫描（确认后走这里） */
       async function runImport(raw, items) {
         if (btnAdd.isConnected) btnAdd.textContent = '扫描中…';
@@ -1738,6 +1833,15 @@
           folderInput.value = '';
           renderStepPanel();
           showResolved(items);
+
+          /* 新导入的资料直接进 AI 分析：数量少就自动跑，太多让人自己点，避免一次烧太多额度 */
+          const newIds = (imp.added || []).map(x => x.id).filter(Boolean);
+          if (newIds.length && newIds.length <= 40) {
+            setTimeout(() => aiClassify(newIds), 350);
+          } else if (newIds.length) {
+            logAct(`导入 ${newIds.length} 份资料，等待 AI 分析分类`);
+            toast(`已导入 ${newIds.length} 份，点「AI 分析分类」让系统读内容判定类别`, 'info');
+          }
         } else {
           renderStepPanel();
           toast('这个文件夹已在扫描列表里，可直接点「重新扫描」', 'warn');
@@ -1803,6 +1907,8 @@
           const rb = r.rebuilt && r.rebuilt.chunks ? ' · 知识库已重建' : '';
           logAct(`重新扫描文件夹，新增 ${nAdd} 份、更新 ${nUp} 份`);
           toast(nAdd || nUp ? `新增 ${nAdd} 份${nUp ? `、更新 ${nUp} 份` : ''}资料${rb}` : '没有发现新增或改动的文档', nAdd || nUp ? 'info' : 'warn');
+          const newIds = [...(r.added || []), ...(r.updated || [])].map(x => x.id).filter(Boolean);
+          if (newIds.length && newIds.length <= 40) setTimeout(() => aiClassify(newIds), 350);
         } catch (e) {
           btnRescan.disabled = false; btnRescan.textContent = '重新扫描全部（更新知识库）';
           toast('扫描失败：' + e.message, 'warn');
@@ -1820,6 +1926,8 @@
         const nAdd = r.added.length, nUp = r.updated.length;
         const rb = r.rebuilt && r.rebuilt.chunks ? ' · 知识库已重建' : '';
         toast(nAdd || nUp ? `新增 ${nAdd} 份${nUp ? `、更新 ${nUp} 份` : ''}资料${rb}` : '这个文件夹没有新增或改动的文档', nAdd || nUp ? 'info' : 'warn');
+        const newIds = [...(r.added || []), ...(r.updated || [])].map(x => x.id).filter(Boolean);
+        if (newIds.length && newIds.length <= 40) setTimeout(() => aiClassify(newIds), 350);
       } catch (e) {
         btn.disabled = false; btn.textContent = '重新扫描';
         toast('扫描失败：' + e.message, 'warn');

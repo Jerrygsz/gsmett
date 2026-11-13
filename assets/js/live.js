@@ -137,6 +137,8 @@
         name: d.name,
         ext: (d.ext || '').toUpperCase().slice(0, 4),
         cat: d.cat || guessCat(d.name),
+        catSource: d.catSource || 'rule',
+        catWhy: d.catWhy || '',
         bytes: d.size,
         size: d.sizeText,
         pages: d.pages,
@@ -346,6 +348,21 @@
       const r = await API.setDocCat(this.clientId, docId, cat);
       if (r.error) throw new Error(r.error);
       this.docs = r.docs || this.docs;
+      return r;
+    },
+
+    /* AI 按内容判定分类：一批最多 10 份，调用方循环直到 done */
+    async classifyDocs(ids, limit) {
+      const payload = {};
+      if (ids && ids.length) payload.ids = ids;
+      if (limit) payload.limit = limit;
+      const r = await API.classifyDocs(this.clientId, payload);
+      if (r.error) {
+        const e = new Error(r.error);
+        e.data = r;
+        throw e;
+      }
+      this.docs = (await API.docs(this.clientId)).docs || [];
       return r;
     },
 

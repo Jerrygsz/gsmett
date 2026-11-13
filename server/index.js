@@ -211,6 +211,112 @@ function guessCat(name) {
 
 const docCat = (d) => d.cat || guessCat(d.name);
 
+/* ---------------- AI 资料分类 ----------------
+ * 只看文件名的规则，会把报价单、PI、订单全塞进「产品资料」。
+ * 这里改成读正文节选交给模型判定，四选一，并把判定理由一起存下来，
+ * 让人能看出「为什么归到这一类」，而不是给个黑箱结果。
+ */
+const DOC_CATS = ['产品资料', '销售资料', '业务流程', '售后资料'];
+
+const DOC_CAT_GUIDE = [
+  '产品资料：产品规格书、参数表、型号/料号清单、产品目录、认证证书、图纸、BOM、测试报告、包装规格、说明书',
+  '销售资料：报价单、价格表、PI/形式发票、订单、合同商务条款、折扣账期、销售话术、客户名单、竞品对比、展会资料',
+  '业务流程：SOP、作业流程、审批流、内部制度、管理规范、表单模板、岗位职责、培训制度',
+  '售后资料：保修条款、退换货政策、维修指引、客诉处理、不良品判定、返修记录、FAQ 售后部分',
+].join('\n');
+
+const CAT_SYS = `你是企业资料库的归类助手。把每份资料归入下面四类之一，只能选这四个，不要自创类别：
+${DOC_CAT_GUIDE}
+
+判断时以正文内容为主，文件名只作参考。
+只输出 JSON 数组，不要解释、不要 markdown 代码块，格式：
+[{"i":1,"cat":"销售资料","why":"含阶梯报价与PI号"}]
+i 对应资料序号；why 用不超过 20 个字说明判断依据（如"表头是阶梯报价单"）。`;
+
+/* manual=人手动改过（AI 不再覆盖）；ai=模型判定；rule=只有文件名规则 */
+const catSourceOf = (d) => d.catSource || 'rule';
+
+/* 读正文节选：直接读解析后的副本，单份最多取 maxChars 字 */
+async function docExcerpt(d, maxChars = 900) {
+  try {
+    const buf = fs.readFileSync(d.textPath);
+    const parsed = await parseFile(buf, d.name);
+    return String(parsed.text || '').replace(/\s+/g, ' ').trim().slice(0, maxChars);
+  } catch { return ''; }
+}
+
+function parseCatJSON(text, n) {
+  const raw = String(text || '');
+  const a = raw.indexOf('[');
+  const b = raw.lastIndexOf(']');
+  let arr = null;
+  if (a >= 0 && b > a) { try { arr = JSON.parse(raw.slice(a, b + 1)); } catch { } }
+  const out = new Map();
+  if (Array.isArray(arr)) {
+    for (const it of arr) {
+      const i = Number(it && it.i);
+      const cat = String((it && it.cat) || '').trim();
+      if (i >= 1 && i <= n && DOC_CATS.includes(cat)) {
+        out.set(i, { cat, why: String((it && it.why) || '').slice(0, 40) });
+      }
+    }
+  }
+  return out;
+}
+
+/* 一批资料（建议 ≤10 份）交给模型判定，返回每份的分类与理由 */
+async function classifyDocs(id, cfg, targets) {
+  const items = [];
+  for (const d of targets) items.push({ doc: d, excerpt: await docExcerpt(d) });
+
+  const body = items
+    .map((it, i) => `【${i + 1}】文件名：${it.doc.name}\n内容：${it.excerpt || '（读不出文本，可能是扫描件或空文件）'}`)
+    .join('\n\n');
+
+  const r = await LLM.chat(cfg, [
+    { role: 'system', content: CAT_SYS },
+    { role: 'user', content: body },
+  ], { maxTokens: 1500, temperature: 0 });
+
+  const map = parseCatJSON(r.content, items.length);
+  const docs = getDocs(id);
+  const updated = [];
+  const failed = [];
+
+  items.forEach((it, idx) => {
+    const target = docs.find((x) => x.id === it.doc.id);
+    if (!target) return;
+    const hit = map.get(idx + 1);
+    if (hit) {
+      target.cat = hit.cat;
+      target.catSource = 'ai';
+      target.catWhy = hit.why || '';
+      target.catAt = new Date().toISOString();
+      updated.push({ id: target.id, name: target.name, cat: hit.cat, why: target.catWhy });
+    } else {
+      /* 模型漏了这一份：保留文件名规则结果，标记出来让人知道没判成功 */
+      if (!target.cat) { target.cat = guessCat(target.name); target.catSource = 'rule'; }
+      failed.push({ id: target.id, name: target.name });
+    }
+  });
+
+  saveDocs(id, docs);
+
+  const st = ensureState(id);
+  addUsage(st, r.usage);
+  if (updated.length) {
+    st.activity = st.activity || [];
+    st.activity.unshift({
+      t: new Date().toISOString().slice(5, 16).replace('T', ' '),
+      txt: `AI 读了 ${updated.length} 份资料的内容，判定所属分类`,
+      who: 'AI 助手',
+    });
+    saveState(id, st);
+  }
+
+  return { updated, failed, usage: r.usage, model: r.model, ms: r.ms };
+}
+
 /* 模型用量统计。以前配置中心显示「482 次 / 1.24M token / ¥5.12」是编的，
  * 这里记真实调用次数与 token，前端照着显示。 */
 function addUsage(st, usage) {
@@ -656,6 +762,9 @@ async function ingestPath(absPath, clientId, sourceDir) {
     mtimeMs: stt.mtimeMs,
     addedAt: new Date().toISOString(),
     status: parsed.empty ? 'empty' : 'ok',
+    /* 先给文件名规则一个初判，标记来源是 rule，后面 AI 会按内容覆盖 */
+    cat: guessCat(name),
+    catSource: 'rule',
   };
 }
 
@@ -1075,8 +1184,65 @@ async function route(req, res, url) {
   /* --- 资料 --- */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs$/)) && method === 'GET') {
     requireClient(m[1]);
-    const docs = getDocs(m[1]).map((d) => ({ ...d, cat: docCat(d), textPath: undefined }));
+    const docs = getDocs(m[1]).map((d) => ({ ...d, cat: docCat(d), catSource: catSourceOf(d), textPath: undefined }));
     return sendJSON(res, 200, { docs });
+  }
+
+  /* AI 分析分类：读正文判定属于哪类资料。前端分批调用（每批 ≤10 份），带进度 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs\/classify$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const st = ensureState(id);
+    const cfg = effectiveLLM(st);
+    if (!cfg || !cfg.apiKey) {
+      return sendJSON(res, 400, {
+        error: '还没有配置模型 Key。先去第 5 步填一个（DeepSeek / 智谱都行），AI 才能读内容判断分类。',
+        needKey: true,
+      });
+    }
+
+    const all = getDocs(id);
+    const limit = Math.min(Math.max(Number(b.limit) || 8, 1), 20);
+
+    let pool;
+    if (Array.isArray(b.ids) && b.ids.length) {
+      const set = new Set(b.ids.map(String));
+      pool = all.filter((d) => set.has(d.id));
+    } else {
+      /* 没指定就按「还没被 AI 判过、也没被人手动改过」的顺序补 */
+      pool = all.filter((d) => {
+        const s = catSourceOf(d);
+        if (s === 'manual') return false;
+        if (s === 'ai' && !b.force) return false;
+        return true;
+      });
+    }
+
+    const targets = pool.slice(0, limit);
+    if (!targets.length) {
+      return sendJSON(res, 200, { updated: [], failed: [], done: true, remaining: 0, total: all.length });
+    }
+
+    let result;
+    try {
+      result = await classifyDocs(id, cfg, targets);
+    } catch (e) {
+      return sendJSON(res, 502, { error: e.message || '模型调用失败', code: e.code || 'LLM' });
+    }
+
+    const remaining = getDocs(id).filter((d) => {
+      const s = catSourceOf(d);
+      return s !== 'manual' && s !== 'ai';
+    }).length;
+
+    return sendJSON(res, 200, {
+      ...result,
+      done: remaining === 0,
+      remaining,
+      total: all.length,
+      llmSource: cfg.source || 'client',
+    });
   }
 
   /* 改资料分类：分类直接决定哪些助手能查到它，得让人能纠正 */
@@ -1088,8 +1254,11 @@ async function route(req, res, url) {
     const d = docs.find((x) => x.id === m[2]);
     if (!d) return sendJSON(res, 404, { error: '资料不存在' });
     d.cat = String(b.cat || '').trim() || docCat(d);
+    /* 人改过就打上 manual，之后 AI 批量分类不会把人的判断冲掉 */
+    d.catSource = 'manual';
+    d.catWhy = '';
     saveDocs(id, docs);
-    return sendJSON(res, 200, { ok: true, docs: docs.map((x) => ({ ...x, cat: docCat(x), textPath: undefined })) });
+    return sendJSON(res, 200, { ok: true, docs: docs.map((x) => ({ ...x, cat: docCat(x), catSource: catSourceOf(x), textPath: undefined })) });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/docs$/)) && method === 'POST') {
