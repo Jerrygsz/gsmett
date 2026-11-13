@@ -935,7 +935,10 @@ async function route(req, res, url) {
     if (!st.tests?.results) return sendJSON(res, 400, { error: '还没有跑过测试' });
     const item = st.tests.results.find((r) => r.id === b.id);
     if (!item) return sendJSON(res, 404, { error: '题目不存在' });
-    item.verdict = b.verdict; // pass / fix / gap
+    if (!['pass', 'fix', 'gap'].includes(b.verdict)) {
+      return sendJSON(res, 400, { error: '判定值只能是 pass / fix / gap' });
+    }
+    item.verdict = b.verdict;
     item.note = b.note || '';
     saveState(id, st);
     return sendJSON(res, 200, { ok: true, report: summarize(st.tests.results) });

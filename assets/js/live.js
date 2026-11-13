@@ -170,8 +170,14 @@
 
       if (results.length) {
         const marks = {};
+        /* 按题号（t0/t1…）对齐，不用数组下标。
+         * results 的顺序不保证和 items 一致，一旦错位，
+         * 点第 2 题就会存成第 1 题——正是客户反馈的那个现象 */
         results.forEach((r, i) => {
-          if (['pass', 'fix', 'gap'].includes(r.verdict)) marks[i + 1] = r.verdict;
+          if (!['pass', 'fix', 'gap'].includes(r.verdict)) return;
+          const idx = items.findIndex((t) => t.id === r.id);
+          const slot = (idx >= 0 ? idx : i) + 1;
+          marks[slot] = r.verdict;
         });
         TM.state.project.testRun = {
           generated: true,
@@ -295,8 +301,9 @@
       return r;
     },
 
-    async mark(rowIndex, verdict) {
-      const q = TM.TEST_QUESTIONS[rowIndex - 1];
+    async mark(rowId, verdict) {
+      // 按本地序号找题，再拿服务端真实 id；不靠数组下标对齐
+      const q = TM.TEST_QUESTIONS.find((x) => x.id === rowId);
       if (!q?.rid) return;
       return API.markTest(this.clientId, q.rid, verdict);
     },

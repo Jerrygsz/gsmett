@@ -1733,9 +1733,12 @@
     const run = S.project.testRun;
     const Q = TM.TEST_QUESTIONS;
     const marks = run.marks || {};
+    /* live 模式下 marks 已经是唯一真相（服务端判定在 paint 时就填进来了）。
+     * 这里再 fallback 到 q.r，会让"人工改判"失效：取消判定后又被初值顶回去。 */
+    const allowFallback = !(window.LIVE && window.LIVE.on);
     let pass = 0, fix = 0, gap = 0, pending = 0;
     Q.forEach(q => {
-      const m = marks[q.id] || q.r;
+      const m = marks[q.id] || (allowFallback ? q.r : '');
       if (m === 'pass') pass++;
       else if (m === 'fix') fix++;
       else if (m === 'gap') gap++;
@@ -1936,23 +1939,26 @@
       const qid = +b.dataset.qid;
       const mark = b.dataset.mark;
       const run = S.project.testRun;
-      const next = run.marks[qid] === mark ? null : mark;
-      if (next) run.marks[qid] = next; else delete run.marks[qid];
+      run.marks = run.marks || {};
+      /* 点已选中的那一项就保持，不再取消。
+       * 以前是 toggle：已经是「通过」的题再点一次会变成未判定，
+       * 徽章却因为 fallback 到模型初值还显示「通过」，只有按钮暗掉。
+       * 看起来就像"点了第二题、改的却是第一题"，其实是自己在取消第二题。 */
+      run.marks[qid] = mark;
       TM.save();
 
       const row = qi(`.tq[data-q="${qid}"]`);
-      const eff = run.marks[qid] || TM.TEST_QUESTIONS[qid - 1]?.r || 'pass';
       if (row) {
-        qa('.mark-btn', row).forEach(x => x.classList.toggle('is-on', x.dataset.mark === run.marks[qid]));
+        qa('.mark-btn', row).forEach(x => x.classList.toggle('is-on', x.dataset.mark === mark));
         const badge = qi('[data-qbadge]', row);
         if (badge) {
-          badge.className = 'badge ' + (eff === 'pass' ? 'badge--success' : eff === 'fix' ? 'badge--warn' : 'badge--danger');
-          badge.textContent = eff === 'pass' ? '通过' : eff === 'fix' ? '需修改' : '资料不足';
+          badge.className = 'badge ' + (mark === 'pass' ? 'badge--success' : mark === 'fix' ? 'badge--warn' : 'badge--danger');
+          badge.textContent = mark === 'pass' ? '通过' : mark === 'fix' ? '需修改' : '资料不足';
         }
       }
 
       if (window.LIVE && window.LIVE.mark) {
-        window.LIVE.mark(qid, next).catch(() => { });
+        window.LIVE.mark(qid, mark).catch(() => { });
       }
 
       const wrap = qi('#testStatsWrap');
@@ -1977,7 +1983,10 @@
   }
 
   function testRow(q, run, marks) {
-    const m = marks[q.id] || (run.ran ? q.r : '');
+    /* 只认 marks。以前这里 fallback 到 q.r（模型自动判的初值），
+     * 结果人工取消判定后，标记没亮但徽章还显示「通过」，看起来像点了别的题。
+     * 只有非 live（纯前端演示）才用初值兜底。 */
+    const m = marks[q.id] || (!(window.LIVE && window.LIVE.on) ? q.r : '');
     const isKey = q.key;
     const markCls = m === 'pass' ? 'is-pass' : m === 'fix' ? 'is-fix' : m === 'gap' ? 'is-gap' : '';
 
@@ -1988,8 +1997,11 @@
         ${isKey ? `<span class="badge badge--warn">关键</span>` : ''}
         <div style="flex:1"></div>
         ${run.ran
-          ? `<span class="badge ${m === 'pass' ? 'badge--success' : m === 'fix' ? 'badge--warn' : 'badge--danger'}" data-qbadge>${m === 'pass' ? '通过' : m === 'fix' ? '需修改' : '资料不足'}</span>`
-          : `<span class="badge">待运行</span>`}
+          ? (m === 'pass' ? `<span class="badge badge--success" data-qbadge>通过</span>`
+            : m === 'fix' ? `<span class="badge badge--warn" data-qbadge>需修改</span>`
+            : m === 'gap' ? `<span class="badge badge--danger" data-qbadge>资料不足</span>`
+            : `<span class="badge" data-qbadge>未判定</span>`)
+          : `<span class="badge" data-qbadge>待运行</span>`}
       </div>
       <div class="tq__q">${esc(q.q)}</div>
       ${run.ran ? `
@@ -2031,23 +2043,20 @@
       const qid = +b.dataset.qid;
       const mark = b.dataset.mark;
       const run = S.project.testRun;
-      // 再点一次同一判定 = 取消，回落到系统判定
-      if (run.marks[qid] === mark) delete run.marks[qid];
-      else run.marks[qid] = mark;
+      // 点同一项保持，不取消——取消太容易误触，和 live 分支保持一致
+      run.marks[qid] = mark;
       TM.save();
 
       // 局部刷新该行
       const row = qi(`.tq[data-q="${qid}"]`);
       if (row) {
         qa('.mark-btn', row).forEach(x => {
-          x.classList.toggle('is-on', x.dataset.mark === run.marks[qid]);
+          x.classList.toggle('is-on', x.dataset.mark === mark);
         });
         const badge = qi('[data-qbadge]', row);
-        const q = Q.find(x => x.id === qid);
-        const eff = run.marks[qid] || q.r;
         if (badge) {
-          badge.className = 'badge ' + (eff === 'pass' ? 'badge--success' : eff === 'fix' ? 'badge--warn' : 'badge--danger');
-          badge.textContent = eff === 'pass' ? '通过' : eff === 'fix' ? '需修改' : '资料不足';
+          badge.className = 'badge ' + (mark === 'pass' ? 'badge--success' : mark === 'fix' ? 'badge--warn' : 'badge--danger');
+          badge.textContent = mark === 'pass' ? '通过' : mark === 'fix' ? '需修改' : '资料不足';
         }
       }
 
@@ -2146,7 +2155,8 @@
     let reverted = false;
     if (setCheck(step, 'c1', s.ran)) reverted = true;
     if (setCheck(step, 'c2', s.keyDone === s.keyTotal)) reverted = true;
-    if (setCheck(step, 'c3', s.ran && s.rate >= 85)) reverted = true;
+    // 必须全部判定完才谈通过率：判了 3 道就报 100%，等于自欺欺人
+    if (setCheck(step, 'c3', s.ran && s.pending === 0 && s.rate >= 85)) reverted = true;
     refreshGate(step, TM.stepState(step.id));
     if (reverted) {
       toast('测试结果变更，第 7 步需要重新确认', 'warn');
@@ -3368,7 +3378,7 @@
     const totalQ = TM.TEST_QUESTIONS.length;
     const marks = (S.project.testRun && S.project.testRun.marks) || {};
     const issues = TM.TEST_QUESTIONS
-      .map(q => ({ ...q, m: marks[q.id] || q.r }))
+      .map(q => ({ ...q, m: marks[q.id] || ((window.LIVE && window.LIVE.on) ? 'unmarked' : q.r) }))
       .filter(q => q.m !== 'pass');
     const fixN = issues.filter(q => q.m === 'fix').length;
     const gapN = issues.filter(q => q.m === 'gap').length;

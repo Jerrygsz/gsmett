@@ -81,8 +81,12 @@ const TM = (() => {
   /* ---------------------------------------------------------------------
      工具
      --------------------------------------------------------------------- */
-  const qi = (s) => document.querySelector(s);
-  const qa = (s) => Array.from(document.querySelectorAll(s));
+  /* 支持可选的查找范围 root。
+   * 之前只接受一个参数，调用方写的 qi('[data-qbadge]', row) 第二参数被悄悄忽略，
+   * 结果"更新某一行的徽章"实际改的是全页第一个徽章——点第 2 题的判定，
+   * 变色的却是第 1 题，客户看着就像点错了题。 */
+  const qi = (s, root) => (root || document).querySelector(s);
+  const qa = (s, root) => Array.from((root || document).querySelectorAll(s));
   const el = (tag, cls, html) => {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
