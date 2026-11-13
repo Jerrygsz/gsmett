@@ -1536,15 +1536,41 @@
   function docManager() {
     const files = S.project.files || [];
     const total = files.reduce((a, f) => a + (f.bytes || 0), 0);
+    const live = !!(window.LIVE && window.LIVE.on);
+    const folders = (window.LIVE && window.LIVE.on ? window.LIVE.foldersList : null) || S.project.folders || [];
 
     return `
+      <div class="card card--pad mb16" id="scanCard">
+        <div class="row--between mb12">
+          <div style="min-width:0">
+            <b class="fs13">从文件夹自动扫描</b>
+            <div class="fs11 muted" style="line-height:1.6;margin-top:2px">把整份资料夹交给系统，自动找出能建知识库的文档，不用一份份点名。以后加了新文件，点「重新扫描」就补进来。</div>
+          </div>
+        </div>
+        ${live ? `
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <input class="input" id="folderInput" style="flex:1;min-width:180px" placeholder="例如 D:/产品资料 或 C:/Users/你/Desktop/资料">
+            <button class="btn btn--primary" id="btnAddFolder">添加并扫描</button>
+          </div>
+          <div class="fs11 muted mt8" style="line-height:1.6">支持绝对路径（正斜杠或反斜杠都行），多个用分号 ; 或换行分隔。会递归扫描 PDF / Word / Excel / TXT / Markdown / CSV，自动跳过系统目录和隐藏文件。文件只在本机读取，不上传云端。</div>
+          ${folders.length ? `
+            <div class="stack mt12" style="gap:8px" id="folderList">
+              ${folders.map(folderRow).join('')}
+            </div>
+            <div class="row mt12" style="gap:8px;flex-wrap:wrap">
+              <button class="btn btn--ghost btn--sm" id="btnRescan">${icon('refresh')} 重新扫描全部（更新知识库）</button>
+            </div>` : `<div class="fs11 muted mt12">还没有添加文件夹。加上一个，扫描到的文档会直接出现在下面的资料列表里。</div>`}
+          <div id="scanResult"></div>
+        ` : `<div class="note note--info">${icon('info')}<span>扫描硬盘需要本地服务在运行（<span class="mono">node server/index.js</span> 或双击「启动服务.bat」）。当前是演示模式，只能手动添加文件。</span></div>`}
+      </div>
+
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入资料文件">
         <input type="file" id="fileInput" multiple hidden
                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.csv">
         <span class="dropzone__ico">${icon('upload')}</span>
-        <b>把资料拖到这里，或点击选择文件</b>
-        <span class="dropzone__hint">PDF / Word / Excel / TXT / Markdown · 单份不超过 200 MB</span>
-        <span class="dropzone__privacy">${icon('shield')} 文件只在你本机读取文件名与大小，不会上传</span>
+        <b>也可以直接把文件拖到这里</b>
+        <span class="dropzone__hint">PDF / Word / Excel / TXT / Markdown · 单份不超过 80 MB</span>
+        <span class="dropzone__privacy">${icon('shield')} 文件只在这台电脑解析，不上传云端</span>
       </div>
 
       <div class="row--between mt16 mb8">
@@ -1553,7 +1579,7 @@
       </div>
 
       <div class="doc-list" id="docList">
-        ${files.length ? files.map(docRow).join('') : `<div class="empty" style="padding:26px 0">${icon('folder')}<p class="fs12">还没有添加资料。先上传产品目录和规格表，这两份决定回答的上限。</p></div>`}
+        ${files.length ? files.map(docRow).join('') : `<div class="empty" style="padding:26px 0">${icon('folder')}<p class="fs12">还没有资料。扫描一个文件夹，或上传产品目录和规格表——这两份决定回答的上限。</p></div>`}
       </div>
 
       <div class="coverage mt16">
@@ -1570,12 +1596,26 @@
     `;
   }
 
+  function folderRow(f) {
+    const when = f.lastScanAt ? f.lastScanAt.slice(0, 16).replace('T', ' ') : '还没扫描';
+    return `<div class="folder-item">
+      <div class="folder-item__path">
+        <div class="fs12 b5">${esc(f.path)}</div>
+        <div class="fs11 muted">${f.imported || 0} 份已入库${f.count ? ` · 共发现 ${f.count} 个文档` : ''} · ${when}</div>
+      </div>
+      <div class="row" style="gap:6px;flex:0 0 auto">
+        <button class="btn btn--ghost btn--sm" data-rescan="${esc(f.path)}">重新扫描</button>
+        <button class="btn btn--quiet btn--sm" data-removefolder="${esc(f.path)}">移除</button>
+      </div>
+    </div>`;
+  }
+
   function docRow(d) {
     return `<div class="doc-item" data-id="${esc(d.id)}">
       <span class="doc-item__ext">${esc(d.ext || 'FILE')}</span>
       <div class="doc-item__body">
         <b>${esc(d.name)}</b>
-        <span>${esc(d.size)}${d.slices ? ' · 约 ' + d.slices + ' 个切片' : ''}${d.state === 'ocr' ? ' · 已 OCR' : ''}</span>
+        <span>${esc(d.size)}${d.slices ? ' · 约 ' + d.slices + ' 个切片' : ''}${d.state === 'ocr' ? ' · 已 OCR' : ''}${d.sourcePath ? ' · 文件夹导入' : ''}</span>
       </div>
       <select class="select select--sm" data-cat="${esc(d.id)}" aria-label="资料分类">
         ${TM.DOC_CATS.map(c => `<option ${c === d.cat ? 'selected' : ''}>${c}</option>`).join('')}
@@ -1588,6 +1628,85 @@
     const dz = qi('#dropzone');
     if (!dz) return;
     const input = qi('#fileInput');
+
+    /* ---- 从文件夹自动扫描 ---- */
+    const btnAdd = qi('#btnAddFolder');
+    if (btnAdd) {
+      const folderInput = qi('#folderInput');
+      btnAdd.onclick = async () => {
+        const raw = (folderInput.value || '').trim();
+        if (!raw) { toast('先填写要扫描的文件夹路径', 'warn'); return; }
+        if (!(window.LIVE && window.LIVE.on)) { toast('扫描硬盘需要本地服务在运行', 'warn'); return; }
+        btnAdd.disabled = true; btnAdd.textContent = '扫描中…';
+        try {
+          const r = await window.LIVE.addFolders(raw);
+          if (r.badDirs && r.badDirs.length) toast(`这些路径不存在：${r.badDirs.slice(0, 2).join('、')}`, 'warn');
+          if (r.added && r.added.length) {
+            const imp = await window.LIVE.rescanFolders();
+            window.LIVE.paint(); TM.save(); syncDocChecks(step); renderStepPanel();
+            const nAdd = imp.added.length, nUp = imp.updated.length;
+            const rb = imp.rebuilt && imp.rebuilt.chunks ? ' · 知识库已重建' : '';
+            logAct(`扫描文件夹，导入 ${nAdd} 份资料`);
+            toast(nAdd || nUp ? `已导入 ${nAdd} 份${nUp ? `、更新 ${nUp} 份` : ''}资料${rb}` : '这个文件夹里暂时没有能建库的新文档', nAdd || nUp ? 'info' : 'warn');
+          } else {
+            renderStepPanel();
+            toast('这个文件夹已在扫描列表里，可直接点「重新扫描」', 'warn');
+          }
+        } catch (e) {
+          btnAdd.disabled = false; btnAdd.textContent = '添加并扫描';
+          toast('扫描失败：' + e.message, 'warn');
+        }
+      };
+    }
+
+    const btnRescan = qi('#btnRescan');
+    if (btnRescan) {
+      btnRescan.onclick = async () => {
+        if (!(window.LIVE && window.LIVE.on)) return;
+        btnRescan.disabled = true; btnRescan.textContent = '扫描中…';
+        try {
+          const r = await window.LIVE.rescanFolders();
+          window.LIVE.paint(); TM.save(); syncDocChecks(step); renderStepPanel();
+          const nAdd = r.added.length, nUp = r.updated.length;
+          const rb = r.rebuilt && r.rebuilt.chunks ? ' · 知识库已重建' : '';
+          logAct(`重新扫描文件夹，新增 ${nAdd} 份、更新 ${nUp} 份`);
+          toast(nAdd || nUp ? `新增 ${nAdd} 份${nUp ? `、更新 ${nUp} 份` : ''}资料${rb}` : '没有发现新增或改动的文档', nAdd || nUp ? 'info' : 'warn');
+        } catch (e) {
+          btnRescan.disabled = false; btnRescan.textContent = '重新扫描全部（更新知识库）';
+          toast('扫描失败：' + e.message, 'warn');
+        }
+      };
+    }
+
+    qa('[data-rescan]').forEach(btn => btn.onclick = async () => {
+      const dir = btn.dataset.rescan;
+      if (!(window.LIVE && window.LIVE.on)) return;
+      btn.disabled = true; btn.textContent = '扫描中…';
+      try {
+        const r = await window.LIVE.importPaths({ dirs: [dir] });
+        window.LIVE.paint(); TM.save(); syncDocChecks(step); renderStepPanel();
+        const nAdd = r.added.length, nUp = r.updated.length;
+        const rb = r.rebuilt && r.rebuilt.chunks ? ' · 知识库已重建' : '';
+        toast(nAdd || nUp ? `新增 ${nAdd} 份${nUp ? `、更新 ${nUp} 份` : ''}资料${rb}` : '这个文件夹没有新增或改动的文档', nAdd || nUp ? 'info' : 'warn');
+      } catch (e) {
+        btn.disabled = false; btn.textContent = '重新扫描';
+        toast('扫描失败：' + e.message, 'warn');
+      }
+    });
+
+    qa('[data-removefolder]').forEach(btn => btn.onclick = async () => {
+      const dir = btn.dataset.removefolder;
+      if (!(window.LIVE && window.LIVE.on)) return;
+      btn.disabled = true;
+      try {
+        await window.LIVE.removeFolder(dir);
+        renderStepPanel();
+        toast('已移出扫描列表（已导入的资料仍在）', 'info');
+      } catch (e) {
+        btn.disabled = false;
+        toast('移除失败：' + e.message, 'warn');
+      }
+    });
 
     dz.onclick = () => input.click();
     dz.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };

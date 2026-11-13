@@ -93,6 +93,14 @@
     deleteDoc(id, docId) { return this.del(`/api/clients/${id}/docs/${docId}`); },
     setDocCat(id, docId, cat) { return this.patch(`/api/clients/${id}/docs/${docId}`, { cat }); },
 
+    /* ---------- 本地文件夹扫描（真实读硬盘） ---------- */
+    scan(id, dirs, recursive) { return this.post(`/api/clients/${id}/scan`, { dirs, recursive }, { timeout: 180000 }); },
+    importPaths(id, payload) { return this.post(`/api/clients/${id}/import`, payload, { timeout: 600000 }); },
+    folders(id) { return this.get(`/api/clients/${id}/folders`); },
+    addFolders(id, dirs, recursive) { return this.post(`/api/clients/${id}/folders`, { dirs, recursive }); },
+    removeFolder(id, dir) { return this.post(`/api/clients/${id}/folders/remove`, { dir }); },
+    rescanFolders(id) { return this.post(`/api/clients/${id}/folders/rescan`, {}, { timeout: 600000 }); },
+
     /* ---------- 知识库 ---------- */
     buildKb(id) { return this.post(`/api/clients/${id}/kb/build`, {}); },
     kbStats(id) { return this.get(`/api/clients/${id}/kb/stats`); },

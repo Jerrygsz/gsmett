@@ -130,6 +130,18 @@ export function saveDocs(id, docs) {
   return docs;
 }
 
+/* 被扫描/纳入知识库的本地文件夹（每个客户一份）
+ * [{ path, addedAt, lastScanAt, imported, count, recursive }] */
+export function getFolders(id) {
+  const f = readJSON(path.join(clientDir(id), 'folders.json'), []);
+  return Array.isArray(f) ? f : [];
+}
+
+export function saveFolders(id, folders) {
+  writeJSON(path.join(clientDir(id), 'folders.json'), folders);
+  return folders;
+}
+
 export function getIndex(id) {
   return readJSON(path.join(clientDir(id), 'index.json'), null);
 }

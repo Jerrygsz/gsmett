@@ -749,6 +749,14 @@ table{border-collapse:collapse;width:100%}
 .doc-item__del{color:var(--text-4);padding:0 4px}
 .doc-item__del:hover{color:var(--danger)}
 
+/* 已扫描的文件夹行 */
+.folder-item{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);
+}
+.folder-item__path{min-width:0;flex:1}
+.folder-item__path>b{display:block;overflow-wrap:anywhere}
+
 .select--sm{height:30px;font-size:12px;width:auto;min-width:96px;padding:0 26px 0 9px;border-radius:7px;background-position:right 8px center}
 
 .coverage{display:flex;flex-wrap:wrap;gap:8px}

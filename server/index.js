@@ -21,6 +21,7 @@ import * as LLM from './llm.js';
 import {
   ROOT, initStorage, listClients, getClient, saveClient, nextProjectNo, deleteClient,
   getState, saveState, patchState, getDocs, saveDocs, getIndex, saveIndex,
+  getFolders, saveFolders,
   uploadDir, clientDir, getConfig, saveConfig,
   getPlatform, savePlatform, getTickets, saveTickets,
   listMembers, addMember, updateMember, removeMember,
@@ -342,6 +343,178 @@ function handleUpload(req, clientId) {
     bb.on('close', () => { ended = true; maybeDone(); });
     req.pipe(bb);
   });
+}
+
+/* ---------------- 本地文件夹扫描 / 导入 ----------------
+ * 本地服务读的是这台电脑真实的文件系统，不是模拟：
+ * 扫描 → 解析 → 复制到客户 uploads/ → 写入 docs.json，和上传走的同一条链路。
+ */
+
+const SCAN_SKIP_DIRS = new Set([
+  'node_modules', '.git', '.svn', '.hg', '.idea', '.vscode', '__pycache__',
+  '$recycle.bin', 'system volume information', '.trash', '.venv', 'venv',
+  'windows', 'program files', 'program files (x86)', 'programdata', 'appdata',
+  'dist', 'build', '.cache', 'temp', 'tmp',
+]);
+
+const SCAN_MAX_FILES = 3000;   // 单次扫描上限，防止扫整个盘扫到卡死
+const SCAN_MAX_DEPTH = 12;
+
+function sizeText(n) {
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.max(1, Math.round(n / 1024)) + ' KB';
+  return n + ' B';
+}
+
+function normAbs(p) {
+  return path.resolve(String(p || '').trim());
+}
+
+/* 多个路径：支持数组，或「分号/换行」分隔的字符串 */
+function normalizeDirs(v) {
+  const arr = Array.isArray(v) ? v : (typeof v === 'string' ? v.split(/[\n;]+/) : []);
+  return [...new Set(arr.map((s) => String(s || '').trim()).filter(Boolean))];
+}
+
+/* 递归遍历一个文件夹，只收受支持的文档类型 */
+async function walkDir(root, { recursive = true, maxFiles = SCAN_MAX_FILES, maxDepth = SCAN_MAX_DEPTH } = {}) {
+  const out = [];
+  let truncated = false;
+  const stack = [{ dir: root, depth: 0 }];
+  while (stack.length) {
+    if (out.length >= maxFiles) { truncated = true; break; }
+    const { dir, depth } = stack.pop();
+    let ents;
+    try { ents = await fs.promises.readdir(dir, { withFileTypes: true }); }
+    catch { continue; }
+    for (const ent of ents) {
+      if (out.length >= maxFiles) { truncated = true; break; }
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        if (!recursive || depth >= maxDepth) continue;
+        if (ent.name.startsWith('.') || SCAN_SKIP_DIRS.has(ent.name.toLowerCase())) continue;
+        stack.push({ dir: full, depth: depth + 1 });
+      } else if (ent.isFile()) {
+        if (ent.name.startsWith('.') || !isSupported(ent.name)) continue;
+        let stt;
+        try { stt = await fs.promises.stat(full); } catch { continue; }
+        out.push({ path: full, name: ent.name, ext: extOf(ent.name), size: stt.size, sizeText: sizeText(stt.size), mtimeMs: stt.mtimeMs, dir });
+      }
+    }
+  }
+  return { files: out, truncated };
+}
+
+/* 把磁盘上的一个文件读进来：解析 → 复制到 uploads → 生成 doc 记录 */
+async function ingestPath(absPath, clientId, sourceDir) {
+  const buf = fs.readFileSync(absPath);
+  if (buf.length > MAX_UPLOAD) {
+    const e = new Error(`超过 ${MAX_UPLOAD / 1024 / 1024}MB 上限`);
+    throw e;
+  }
+  const name = path.basename(absPath);
+  const ext = extOf(name);
+  const parsed = await parseFile(buf, name);
+  const id = 'd' + crypto.randomBytes(6).toString('hex');
+  const saved = path.join(uploadDir(clientId), `${id}.${ext}`);
+  fs.writeFileSync(saved, buf);
+  const stt = fs.statSync(absPath);
+  return {
+    id, name, ext, size: buf.length, sizeText: sizeText(buf.length),
+    pages: parsed.pages, chars: parsed.chars, scanned: !!parsed.scanned,
+    empty: !!parsed.empty, ms: parsed.ms, textPath: saved,
+    sourcePath: absPath, sourceDir: sourceDir || path.dirname(absPath),
+    mtimeMs: stt.mtimeMs,
+    addedAt: new Date().toISOString(),
+    status: parsed.empty ? 'empty' : 'ok',
+  };
+}
+
+/* 批量导入：按 sourcePath 去重，内容变了就替换，没变就跳过 */
+async function importEntries(clientId, entries) {
+  const docs = getDocs(clientId);
+  const bySource = new Map(docs.filter((d) => d.sourcePath).map((d) => [d.sourcePath, d]));
+  const added = [];
+  const updated = [];
+  const skipped = [];
+  const failed = [];
+
+  for (const ent of entries) {
+    const abs = normAbs(ent.path);
+    const prev = bySource.get(abs);
+    try {
+      const stt = fs.statSync(abs);
+      if (prev) {
+        if (prev.mtimeMs && Math.abs(prev.mtimeMs - stt.mtimeMs) < 1 && prev.size === stt.size) {
+          skipped.push({ name: path.basename(abs), reason: '未变化' });
+          continue;
+        }
+        const rec = await ingestPath(abs, clientId, ent.dir);
+        const i = docs.findIndex((d) => d.id === prev.id);
+        try { fs.unlinkSync(prev.textPath); } catch { }
+        const merged = { ...rec, id: prev.id, cat: prev.cat, addedAt: prev.addedAt || rec.addedAt };
+        if (i >= 0) docs[i] = merged; else docs.push(merged);
+        bySource.set(abs, merged);
+        updated.push({ name: rec.name });
+      } else {
+        const rec = await ingestPath(abs, clientId, ent.dir);
+        docs.push(rec);
+        bySource.set(abs, rec);
+        added.push({ id: rec.id, name: rec.name, chars: rec.chars });
+      }
+    } catch (e) {
+      failed.push({ name: path.basename(abs), reason: e.message });
+    }
+  }
+
+  saveDocs(clientId, docs);
+  return { added, updated, skipped, failed, total: docs.length };
+}
+
+/* 按文件夹路径统计已导入的份数 */
+function countImportedIn(docs, folderPath) {
+  const base = folderPath.endsWith(path.sep) ? folderPath : folderPath + path.sep;
+  return docs.filter((d) => d.sourcePath && (d.sourcePath === folderPath || d.sourcePath.startsWith(base))).length;
+}
+
+/* 建库：把所有可用资料切片并建倒排索引。导入新资料后复用它自动重建。 */
+async function buildKbForClient(id) {
+  const docs = getDocs(id).filter((d) => d.status === 'ok');
+  if (!docs.length) {
+    const e = new Error('还没有可用的资料，先上传再建库');
+    e.status = 400;
+    throw e;
+  }
+  const started = Date.now();
+  const chunks = [];
+  const perDoc = [];
+  for (const d of docs) {
+    const buf = fs.readFileSync(d.textPath);
+    const parsed = await parseFile(buf, d.name);
+    const cs = chunkDoc(parsed);
+    cs.forEach((c) => chunks.push({ ...c, doc: d.name, docId: d.id }));
+    perDoc.push({ id: d.id, name: d.name, chunks: cs.length, pages: parsed.pages });
+  }
+  const index = buildIndex(chunks);
+  saveIndex(id, { chunks, index: { ...index, postings: index.postings }, builtAt: new Date().toISOString() });
+
+  const st = ensureState(id);
+  st.kb = {
+    chunks: chunks.length,
+    docs: docs.length,
+    terms: Object.keys(index.postings).length,
+    builtAt: new Date().toISOString(),
+    perDoc,
+  };
+  st.activity = st.activity || [];
+  st.activity.unshift({
+    t: new Date().toISOString().slice(5, 16).replace('T', ' '),
+    txt: `知识库构建完成，生成 ${chunks.length} 个切片`,
+    who: '系统',
+  });
+  saveState(id, st);
+
+  return { chunks: chunks.length, docs: docs.length, terms: Object.keys(index.postings).length, perDoc, ms: Date.now() - started };
 }
 
 /* ---------------- 路由 ---------------- */
@@ -728,55 +901,184 @@ async function route(req, res, url) {
     return sendJSON(res, 200, { ok: true });
   }
 
+  /* --- 本地文件夹扫描 / 导入 --- */
+
+  /* 只扫描、不导入：先让用户看清楚发现了哪些文件 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/scan$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const dirs = normalizeDirs(b.dirs);
+    if (!dirs.length) return sendJSON(res, 400, { error: '请提供要扫描的文件夹路径' });
+    const recursive = b.recursive !== false;
+
+    const docs = getDocs(id);
+    const importedSet = new Set(docs.filter((d) => d.sourcePath).map((d) => d.sourcePath));
+    let all = [];
+    let truncated = false;
+    const badDirs = [];
+
+    for (const d of dirs) {
+      const abs = normAbs(d);
+      let isDir = false;
+      try { isDir = fs.statSync(abs).isDirectory(); } catch { }
+      if (!isDir) { badDirs.push(d); continue; }
+      const r = await walkDir(abs, { recursive });
+      truncated = truncated || r.truncated;
+      all = all.concat(r.files);
+    }
+
+    return sendJSON(res, 200, {
+      files: all.map((f) => ({ ...f, imported: importedSet.has(f.path), dirName: path.basename(f.dir) })),
+      total: all.length,
+      truncated,
+      badDirs,
+    });
+  }
+
+  /* 导入：显式给文件路径，或给文件夹路径（先扫再导） */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/import$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+
+    let entries = [];
+    const badDirs = [];
+    if (Array.isArray(b.paths) && b.paths.length) {
+      entries = b.paths
+        .map((x) => normAbs(x))
+        .filter((abs) => { try { return isSupported(abs) && fs.statSync(abs).isFile(); } catch { return false; } })
+        .map((abs) => ({ path: abs, dir: path.dirname(abs) }));
+    } else {
+      const dirs = normalizeDirs(b.dirs);
+      for (const d of dirs) {
+        const abs = normAbs(d);
+        let isDir = false;
+        try { isDir = fs.statSync(abs).isDirectory(); } catch { }
+        if (!isDir) { badDirs.push(d); continue; }
+        const r = await walkDir(abs, { recursive: b.recursive !== false });
+        entries = entries.concat(r.files.map((f) => ({ path: f.path, dir: abs })));
+      }
+    }
+
+    const result = await importEntries(id, entries);
+    const changed = result.added.length || result.updated.length;
+    if (changed) {
+      const st = ensureState(id);
+      st.activity = st.activity || [];
+      st.activity.unshift({
+        t: new Date().toISOString().slice(5, 16).replace('T', ' '),
+        txt: `从本地文件夹导入 ${result.added.length} 份${result.updated.length ? `、更新 ${result.updated.length} 份` : ''}资料`,
+        who: '系统',
+      });
+      saveState(id, st);
+    }
+    // 已经建过库的客户，导入新资料后自动重建，助手立刻能查到
+    let rebuilt = null;
+    if (changed && (getState(id)?.kb?.chunks || 0) > 0) {
+      try { rebuilt = await buildKbForClient(id); } catch (e) { rebuilt = { error: e.message }; }
+    }
+    return sendJSON(res, 200, { ...result, rebuilt, badDirs });
+  }
+
+  /* 已纳入的文件夹列表 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/folders$/)) && method === 'GET') {
+    const id = m[1];
+    requireClient(id);
+    return sendJSON(res, 200, { folders: getFolders(id) });
+  }
+
+  /* 添加文件夹（注册到客户名下，随后由前端触发 rescan 导入） */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/folders$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const dirs = normalizeDirs(b.dirs);
+    if (!dirs.length) return sendJSON(res, 400, { error: '请提供文件夹路径' });
+
+    const folders = getFolders(id);
+    const added = [];
+    const badDirs = [];
+    for (const d of dirs) {
+      const abs = normAbs(d);
+      let isDir = false;
+      try { isDir = fs.statSync(abs).isDirectory(); } catch { }
+      if (!isDir) { badDirs.push(d); continue; }
+      if (folders.some((f) => f.path === abs)) continue;
+      folders.push({
+        path: abs, addedAt: new Date().toISOString(), lastScanAt: null,
+        imported: 0, count: 0, recursive: b.recursive !== false,
+      });
+      added.push(abs);
+    }
+    saveFolders(id, folders);
+    return sendJSON(res, 200, { folders, added, badDirs });
+  }
+
+  /* 移除文件夹（只取消自动扫描，已导入的资料仍在） */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/folders\/remove$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const abs = normAbs(b.dir);
+    const folders = getFolders(id).filter((f) => f.path !== abs);
+    saveFolders(id, folders);
+    return sendJSON(res, 200, { folders });
+  }
+
+  /* 重新扫描全部文件夹：只导入新增或内容有变化的文件，用于随时扩充/更新知识库 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/folders\/rescan$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const folders = getFolders(id);
+    if (!folders.length) return sendJSON(res, 400, { error: '还没有添加文件夹' });
+
+    let entries = [];
+    let truncated = false;
+    for (const f of folders) {
+      const r = await walkDir(f.path, { recursive: f.recursive !== false });
+      truncated = truncated || r.truncated;
+      entries = entries.concat(r.files.map((x) => ({ path: x.path, dir: f.path })));
+      f.count = r.files.length;
+      f.lastScanAt = new Date().toISOString();
+    }
+
+    const result = await importEntries(id, entries);
+    const docs = getDocs(id);
+    for (const f of folders) f.imported = countImportedIn(docs, f.path);
+    saveFolders(id, folders);
+
+    const changed = result.added.length || result.updated.length;
+    if (changed) {
+      const st = ensureState(id);
+      st.activity = st.activity || [];
+      st.activity.unshift({
+        t: new Date().toISOString().slice(5, 16).replace('T', ' '),
+        txt: `重新扫描文件夹，新增 ${result.added.length} 份、更新 ${result.updated.length} 份资料`,
+        who: '系统',
+      });
+      saveState(id, st);
+    }
+
+    // 已建过库的客户：重扫后自动重建索引，新资料立即进入知识库
+    let rebuilt = null;
+    if (changed && (getState(id)?.kb?.chunks || 0) > 0) {
+      try { rebuilt = await buildKbForClient(id); } catch (e) { rebuilt = { error: e.message }; }
+    }
+
+    return sendJSON(res, 200, { ...result, folders, truncated, rebuilt });
+  }
+
   /* --- 知识库 --- */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/kb\/build$/)) && method === 'POST') {
     const id = m[1];
     requireClient(id);
-    const docs = getDocs(id).filter((d) => d.status === 'ok');
-    if (!docs.length) return sendJSON(res, 400, { error: '还没有可用的资料，先上传再建库' });
-
-    const started = Date.now();
-    const chunks = [];
-    const perDoc = [];
-    for (const d of docs) {
-      const buf = fs.readFileSync(d.textPath);
-      const parsed = await parseFile(buf, d.name);
-      const cs = chunkDoc(parsed);
-      cs.forEach((c) => chunks.push({ ...c, doc: d.name, docId: d.id }));
-      perDoc.push({ id: d.id, name: d.name, chunks: cs.length, pages: parsed.pages });
+    try {
+      const r = await buildKbForClient(id);
+      return sendJSON(res, 200, { ok: true, ...r });
+    } catch (e) {
+      return sendJSON(res, e.status || 500, { error: e.message });
     }
-
-    const index = buildIndex(chunks);
-    saveIndex(id, {
-      chunks,
-      index: { ...index, postings: index.postings },
-      builtAt: new Date().toISOString(),
-    });
-
-    const st = ensureState(id);
-    st.kb = {
-      chunks: chunks.length,
-      docs: docs.length,
-      terms: Object.keys(index.postings).length,
-      builtAt: new Date().toISOString(),
-      perDoc,
-    };
-    st.activity = st.activity || [];
-    st.activity.unshift({
-      t: new Date().toISOString().slice(5, 16).replace('T', ' '),
-      txt: `知识库构建完成，生成 ${chunks.length} 个切片`,
-      who: '系统',
-    });
-    saveState(id, st);
-
-    return sendJSON(res, 200, {
-      ok: true,
-      chunks: chunks.length,
-      docs: docs.length,
-      terms: Object.keys(index.postings).length,
-      perDoc,
-      ms: Date.now() - started,
-    });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/kb\/stats$/)) && method === 'GET') {

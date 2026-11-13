@@ -12,6 +12,7 @@
     clientId: null,
     client: null,
     docs: [],
+    foldersList: [],
     kb: null,
     llm: null,
     tests: null,
@@ -66,13 +67,14 @@
     /* 拉取全部真实数据 */
     async reload() {
       const id = this.clientId;
-      const [stateR, docsR, kbR, llmR, testsR, asstR] = await Promise.all([
+      const [stateR, docsR, kbR, llmR, testsR, asstR, foldersR] = await Promise.all([
         API.state(id),
         API.docs(id),
         API.kbStats(id),
         API.llm(id),
         API.getTests(id),
         API.assistants(id),
+        API.folders(id),
       ]);
 
       this.serverState = stateR.state || {};
@@ -81,6 +83,7 @@
       this.llm = llmR || { configured: false };
       this.tests = testsR || { items: [] };
       this.assistants = asstR.assistants || [];
+      this.foldersList = foldersR.folders || [];
     },
 
     /* 把服务端状态合并进 TM.state，供现有 UI 渲染 */
@@ -141,7 +144,11 @@
         slices: 0,
         state: d.status === 'empty' ? 'ocr' : 'ok',
         scanned: d.scanned,
+        sourcePath: d.sourcePath || '',
+        sourceDir: d.sourceDir || '',
       }));
+      // 已纳入扫描的文件夹，供资料页展示与「重新扫描」
+      S.project.folders = this.foldersList || [];
 
       // 测试题：服务端结果 → 现有 TEST_QUESTIONS 结构
       this.paintTests();
@@ -246,6 +253,43 @@
       await API.deleteDoc(this.clientId, docId);
       this.docs = (await API.docs(this.clientId)).docs || [];
       return this.docs;
+    },
+
+    /* ---------------- 本地文件夹扫描 ---------------- */
+
+    async scanDirs(dirs, recursive) {
+      const r = await API.scan(this.clientId, dirs, recursive);
+      if (r.error) throw new Error(r.error);
+      return r;
+    },
+
+    async importPaths(payload) {
+      const r = await API.importPaths(this.clientId, payload);
+      if (r.error) throw new Error(r.error);
+      this.docs = (await API.docs(this.clientId)).docs || [];
+      return r;
+    },
+
+    async addFolders(dirs, recursive) {
+      const r = await API.addFolders(this.clientId, dirs, recursive);
+      if (r.error) throw new Error(r.error);
+      this.foldersList = r.folders || [];
+      return r;
+    },
+
+    async removeFolder(dir) {
+      const r = await API.removeFolder(this.clientId, dir);
+      if (r.error) throw new Error(r.error);
+      this.foldersList = r.folders || [];
+      return r;
+    },
+
+    async rescanFolders() {
+      const r = await API.rescanFolders(this.clientId);
+      if (r.error) throw new Error(r.error);
+      this.foldersList = r.folders || this.foldersList;
+      this.docs = (await API.docs(this.clientId)).docs || [];
+      return r;
     },
 
     /* ---------------- 知识库 ---------------- */
