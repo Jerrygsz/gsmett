@@ -1540,6 +1540,7 @@
     const folders = (window.LIVE && window.LIVE.on ? window.LIVE.foldersList : null) || S.project.folders || [];
     const pendingCat = files.filter(f => f.catSource !== 'ai' && f.catSource !== 'manual').length;
     const aiDone = files.filter(f => f.catSource === 'ai').length;
+    const lowCat = files.filter(f => f.catLow).length;
 
     return `
       <div class="card card--pad mb16" id="scanCard">
@@ -1595,7 +1596,9 @@
         <div class="ai-cat__bar" id="aiCatBar" hidden><i></i></div>
         <div class="fs11 muted mt8" id="aiCatStat" style="line-height:1.6">${pendingCat
           ? '点上面的按钮开始。每批分析 10 份，中途可以离开这个页面，进度会停在这一批结束的位置。'
-          : '分类已全部由 AI 读过内容判定。手动改过的资料会保住你的选择，不会被 AI 覆盖。'}</div>
+          : (lowCat
+            ? `分类已完成：${aiDone - lowCat} 份是 AI 读过正文判定的；另有 ${lowCat} 份是扫描件（没有文字层），只能按文件名判断，已标成「待复核」，建议抽空人工确认。`
+            : '分类已全部由 AI 读过正文判定。手动改过分类的资料会保住你的选择，不会被 AI 覆盖。')}</div>
       </div>
 
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入资料文件">
@@ -1653,7 +1656,9 @@
 
   function docRow(d) {
     const tag = d.catSource === 'ai'
-      ? `<span class="doc-tag doc-tag--ai" title="AI 读过内容后判定">AI 判定</span>`
+      ? (d.catLow
+        ? `<span class="doc-tag doc-tag--todo" title="这是扫描件，没有文字层，AI 只能按文件名判断，建议人工确认">待复核</span>`
+        : `<span class="doc-tag doc-tag--ai" title="AI 读过内容后判定">AI 判定</span>`)
       : d.catSource === 'manual'
         ? `<span class="doc-tag doc-tag--man" title="你手动指定的分类，AI 不会覆盖">手动</span>`
         : `<span class="doc-tag doc-tag--todo" title="只按文件名推断，建议用 AI 分析一次">待分析</span>`;

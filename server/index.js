@@ -287,12 +287,17 @@ async function classifyDocs(id, cfg, targets) {
     const target = docs.find((x) => x.id === it.doc.id);
     if (!target) return;
     const hit = map.get(idx + 1);
+    /* 扫描件没有文字层，模型只能看文件名——结果要标成「待复核」，别当成读过内容 */
+    const noText = (it.excerpt || '').replace(/\s/g, '').length < 20;
     if (hit) {
       target.cat = hit.cat;
       target.catSource = 'ai';
-      target.catWhy = hit.why || '';
+      target.catLow = noText;
+      target.catWhy = noText
+        ? `无文字层，仅凭文件名${hit.why ? '：' + hit.why : '判断'}`
+        : (hit.why || '');
       target.catAt = new Date().toISOString();
-      updated.push({ id: target.id, name: target.name, cat: hit.cat, why: target.catWhy });
+      updated.push({ id: target.id, name: target.name, cat: hit.cat, why: target.catWhy, low: noText });
     } else {
       /* 模型漏了这一份：保留文件名规则结果，标记出来让人知道没判成功 */
       if (!target.cat) { target.cat = guessCat(target.name); target.catSource = 'rule'; }

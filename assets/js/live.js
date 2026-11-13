@@ -139,6 +139,7 @@
         cat: d.cat || guessCat(d.name),
         catSource: d.catSource || 'rule',
         catWhy: d.catWhy || '',
+        catLow: !!d.catLow,
         bytes: d.size,
         size: d.sizeText,
         pages: d.pages,
