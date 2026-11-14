@@ -40,6 +40,7 @@
 
   function router() {
     current = parseHash();
+    if (current.route !== 'portal') portalPreview = false;  // 离开门户就退出预览
     const def = ROUTES[current.route];
     qi('#pageTitle').textContent = def.title;
     document.title = `${def.title} · 贸智库 TradeMind`;
@@ -64,6 +65,24 @@
     }
     qi('#userName').textContent = S.user.name;
     qi('#userAvatar').textContent = S.user.initial;
+
+    /* 侧栏「员工门户」标一下状态：开着还是还没开，一眼能看到 */
+    const navPortal = document.querySelector('.nav-item[data-route="portal"]');
+    if (navPortal && !navPortal.querySelector('.nav-item__badge')) {
+      const dot = document.createElement('span');
+      dot.className = 'nav-item__badge';
+      navPortal.appendChild(dot);
+    }
+    const dot = navPortal && navPortal.querySelector('.nav-item__badge');
+    if (dot) {
+      if (isLiveOn()) {
+        dot.textContent = '使用中';
+        dot.className = 'nav-item__badge nav-item__badge--live';
+      } else {
+        dot.textContent = '未开启';
+        dot.className = 'nav-item__badge';
+      }
+    }
   }
 
   /* ---------------------------------------------------------------------
@@ -103,7 +122,12 @@
     const out = [];
 
     if (p.done === STEPS.length) {
-      return [{ icon: 'checkCircle', color: 'var(--success)', bg: 'var(--success-bg)', title: '项目已全部完成', desc: '十个步骤均已通过检查，可下载交付材料', act: '查看报告', step: 9 }];
+      /* 十步走完不等于员工能用。没开启就先把这条顶在最前面，
+       * 否则客户看到「已全部完成」会以为没自己的事了 */
+      if (!isLiveOn()) {
+        return [{ icon: 'play', color: 'var(--brand)', bg: 'var(--brand-50)', title: '最后一步：开启使用', desc: '十个步骤都完成了，按下开关员工才能开始提问', act: '去开启', step: 10 }];
+      }
+      return [{ icon: 'checkCircle', color: 'var(--success)', bg: 'var(--success-bg)', title: '员工门户已开放', desc: '员工可以提问了，答不上来的问题会攒在门户里', act: '看板', step: 10 }];
     }
 
     const unchecked = cur.checks.filter(c => !saved.checks.includes(c.id));
@@ -180,14 +204,22 @@
 
       <div class="hero-strip">
         <div class="hero-strip__txt">
-          <div class="hero-strip__eyebrow">${allDone ? '已完成' : '进行中'} · 项目编号 ${esc(S.project.id)}</div>
-          <h2>${esc(S.project.name)}${allDone ? '：已交付' : `：还剩 ${remain} 步`}</h2>
+          <div class="hero-strip__eyebrow">${allDone ? (isLiveOn() ? '使用中' : '已完成 · 待开启') : '进行中'} · 项目编号 ${esc(S.project.id)}</div>
+          <h2>${esc(S.project.name)}${allDone ? (isLiveOn() ? '：已开启使用' : '：已交付，待开启') : `：还剩 ${remain} 步`}</h2>
           <p>${allDone
-            ? '十个步骤全部完成，验收报告与操作手册已归档。后续的知识库更新、权限调整都在配置中心处理。'
+            ? (isLiveOn()
+              ? '员工门户已经开放，团队成员可以开始提问了。资料补充、助手范围和权限都在配置中心处理，答不上来的问题会攒在门户里等你看。'
+              : '十个步骤全部完成，验收报告与操作手册已归档。最后一步等你按下「开启使用」——按下去之前，员工那边还是关着的。')
             : `当前在第 ${cur.id} 步「${esc(cur.title)}」。${cur.id === 6 ? '配置已确认，等待执行创建助手。' : '按向导继续即可，遇到卡点可以随时申请人工协助。'}计划 ${due.m} 月 ${due.d} 日完成交付。`}</p>
           <div class="row mt16">
-            <a class="btn btn--primary" href="#wizard/${cur.id}">${allDone ? '查看交付记录' : `继续第 ${cur.id} 步`} ${icon('arrowRight')}</a>
-            <a class="btn" href="#test" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff">查看测试与验收</a>
+            ${allDone
+              ? (isLiveOn()
+                ? `<a class="btn btn--primary" href="#portal">进入使用界面 ${icon('arrowRight')}</a>
+                   <a class="btn" href="#wizard/10" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff">查看交付记录</a>`
+                : `<a class="btn btn--primary" href="#wizard/10">开启使用 ${icon('arrowRight')}</a>
+                   <a class="btn" href="#portal" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff">预览员工界面</a>`)
+              : `<a class="btn btn--primary" href="#wizard/${cur.id}">继续第 ${cur.id} 步 ${icon('arrowRight')}</a>
+                 <a class="btn" href="#test" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff">查看测试与验收</a>`}
           </div>
         </div>
         <div class="hero-strip__stats">
@@ -200,7 +232,7 @@
       ${sectionHead('选购的服务', '已开通 1 项 · 可随时增购', `<a class="btn btn--quiet btn--sm" href="#store">全部服务 ${icon('chevronRight')}</a>`)}
 
       <div class="grid g4">
-        ${serviceTile('kb', '企业 AI 知识库', '已开通 · 实施中', true)}
+        ${serviceTile('kb', '企业 AI 知识库', isLiveOn() ? '使用中' : (TM.progress().done >= STEPS.length ? '已交付 · 待开启' : '已开通 · 实施中'), true)}
         ${serviceTile('sales', 'AI 外贸销售助手', '未开通', false)}
         ${serviceTile('train', '企业 AI 培训系统', '未开通', false)}
         ${serviceTile('admin', '企业 AI 管理', '随项目开通', false)}
@@ -220,14 +252,20 @@
                 <span>创建于 ${esc(S.project.createdAt)}</span>
               </div>
             </div>
-            <span class="badge badge--brand badge--dot">实施中</span>
+            ${allDone
+              ? (isLiveOn()
+                ? `<span class="badge badge--success badge--dot">使用中</span>`
+                : `<span class="badge badge--warn">已交付·待开启</span>`)
+              : `<span class="badge badge--brand badge--dot">实施中</span>`}
           </div>
           <div class="proj-card__prog">
             <div class="bar"><div class="bar__fill" style="width:${p.pct}%"></div></div>
             <b class="tnum">${p.pct}%</b>
           </div>
           <div class="row--between" style="font-size:12px;color:var(--text-3)">
-            <span>已完成 ${p.done} / ${p.total} 个步骤 · 当前第 ${cur.id} 步</span>
+            <span>${allDone
+              ? `已完成 ${p.done} / ${p.total} 个步骤${isLiveOn() ? ' · 员工已可用' : ' · 等待开启使用'}`
+              : `已完成 ${p.done} / ${p.total} 个步骤 · 当前第 ${cur.id} 步`}</span>
             <span>本步预计 ${cur.minutes} 分钟</span>
           </div>
           <div class="proj-card__foot">
@@ -235,7 +273,11 @@
               ${(S.members || []).slice(0, 3).map((m, i) => `<span class="avatar" style="width:24px;height:24px;font-size:10px;background:${['#2C5866', '#7A5C2E', '#3E4F63'][i % 3]};${i ? 'margin-left:-6px' : ''}">${esc(m.name.slice(0, 1))}</span>`).join('')}
               <span class="fs12 muted" style="margin-left:8px">${(S.members || []).length} 人参与</span>
             </div>
-            <a class="btn btn--ghost btn--sm" href="#wizard/${cur.id}">继续项目 ${icon('arrowRight')}</a>
+            ${allDone
+              ? (isLiveOn()
+                ? `<a class="btn btn--ghost btn--sm" href="#portal">进入使用 ${icon('arrowRight')}</a>`
+                : `<a class="btn btn--ghost btn--sm" href="#wizard/10">开启使用 ${icon('arrowRight')}</a>`)
+              : `<a class="btn btn--ghost btn--sm" href="#wizard/${cur.id}">继续项目 ${icon('arrowRight')}</a>`}
           </div>
         </div>
 
@@ -609,6 +651,12 @@
             </div>
           </div>` : ''}
 
+          ${step.id === 10 && st === 'done' ? `
+          <div class="step-block">
+            <div class="step-block__label">开启使用</div>
+            ${goLiveCard()}
+          </div>` : ''}
+
           ${step.id === 2 ? envBlock(step, st, saved) : ''}
 
           ${step.id === 5 ? `
@@ -651,7 +699,12 @@
           ${st === 'done'
             ? (step.id < STEPS.length
               ? `<button class="btn btn--primary" id="btnNext">下一步：${esc(STEPS[step.id].title)} ${icon('arrowRight')}</button>`
-              : `<span class="badge badge--success">项目已全部完成</span>`)
+              : (isLiveOn()
+                ? `<span class="badge badge--success badge--dot">使用中</span>
+                   <a class="btn btn--ghost btn--sm" href="#wizard/10">交付记录</a>
+                   <a class="btn btn--primary" href="#portal">进入使用界面 ${icon('arrowRight')}</a>`
+                : `<span class="badge badge--success">项目已全部完成</span>
+                   <button class="btn btn--primary" id="btnGoLiveFoot">开启使用 ${icon('arrowRight')}</button>`))
             : `<span class="step-foot__hint" id="footHint">${st === 'locked' ? icon('lock') + ' 等待前置步骤完成' : allChecked ? icon('checkCircle') + ' 已满足完成条件' : icon('info') + ' 请先完成上方检查项'}</span>
                <button class="btn btn--primary" id="btnDone" ${st === 'locked' || !allChecked ? 'disabled' : ''}>完成这一步 ${icon('check')}</button>`}
         </div>
@@ -728,6 +781,21 @@
     // 完成
     const bd = qi('#btnDone');
     if (bd) bd.onclick = () => completeStep(step);
+
+    // 开启/暂停使用
+    const bgl = qi('#btnGoLive') || qi('#btnGoLiveFoot');
+    if (bgl) bgl.onclick = askGoLive;
+    const bglOff = qi('#btnGoLiveOff');
+    if (bglOff) bglOff.onclick = askGoLiveOff;
+    const bcp = qi('#btnCopyPortal');
+    if (bcp) bcp.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(portalLink());
+        toast('员工入口已复制，发到群里就行');
+      } catch {
+        toast('浏览器不允许自动复制，点开「进入使用界面」后从地址栏复制', 'warn');
+      }
+    };
 
     // 导航（用 replaceState + 手动渲染，避免相同 hash 不触发事件）
     const nav = (id) => { history.replaceState(null, '', `#wizard/${id}`); router(); };
@@ -1416,6 +1484,196 @@
         router();
       }
     }, 600);
+  }
+
+  /* ---------------------------------------------------------------------
+     开启使用
+     交付完成 ≠ 员工能用。十步走完只是这套东西配好了，
+     真正对员工开放要客户自己按一下开关——所以这一步做成显式动作，可开可停。
+     --------------------------------------------------------------------- */
+  function isLiveOn() {
+    return !!(S.project.live && S.project.live.on);
+  }
+
+  function fmtClock(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const z = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
+  }
+
+  function portalLink() {
+    const id = (window.LIVE && window.LIVE.clientId) || '';
+    return id ? `${location.origin}/app.html?c=${id}#portal` : `${location.origin}/app.html#portal`;
+  }
+
+  /* 上线前的体检。服务端还会再校一遍，这里先让人看见差在哪，别点了才发现开不了 */
+  function goLiveChecks() {
+    const live = !!(window.LIVE && window.LIVE.on);
+    const prog = TM.progress();
+    const docs = live ? (window.LIVE.docs || []) : (S.project.files || []);
+    const asstN = live ? (window.LIVE.assistants || []).length : (TM.ASSISTANTS || []).length;
+    const chunks = live ? (window.LIVE.kb?.chunks || 0) : docs.length * 12;
+    const cats = [...new Set(docs.map((d) => d.cat).filter(Boolean))];
+    const catN = cats.length;
+
+    return [
+      {
+        key: 'steps',
+        ok: prog.done >= STEPS.length,
+        label: '十个步骤全部完成',
+        hint: prog.done >= STEPS.length ? `${prog.done}/${STEPS.length}` : `还差 ${STEPS.length - prog.done} 步`,
+      },
+      {
+        key: 'assistants',
+        ok: asstN > 0,
+        label: '至少一个 AI 助手',
+        hint: asstN ? `${asstN} 个` : '去第 6 步创建',
+      },
+      {
+        key: 'kb',
+        ok: chunks > 0,
+        label: '知识库已建好',
+        hint: chunks ? `${chunks.toLocaleString()} 个切片` : '去第 4 步建库',
+      },
+      {
+        key: 'docs',
+        ok: docs.length > 0,
+        label: '资料已入库',
+        hint: docs.length ? `${docs.length} 份 · ${catN} 类` : '去第 3 步上传',
+      },
+    ];
+  }
+
+  function goLiveCard() {
+    const on = isLiveOn();
+    const checks = goLiveChecks();
+    const ready = checks.every((c) => c.ok);
+    const link = portalLink();
+    const at = fmtClock(S.project.live && S.project.live.at);
+    const by = (S.project.live && S.project.live.by) || '';
+
+    if (on) {
+      return `<div class="golive is-on">
+        <div class="golive__head">
+          <span class="golive__ico">${icon('checkCircle')}</span>
+          <div style="flex:1;min-width:0">
+            <b class="fs13">已开启使用</b>
+            <p class="fs11 muted" style="line-height:1.65;margin:3px 0 0">${esc(at || '')}${by ? ' 由 ' + esc(by) + ' ' : ''}开启。员工现在能打开下面的地址直接提问；问不出来会被记进「答不上来的问题」，你可以据此补资料。</p>
+          </div>
+          <span class="badge badge--success badge--dot">使用中</span>
+        </div>
+        <div class="golive__link">
+          <span class="golive__link-label">员工入口</span>
+          <code>${esc(link)}</code>
+          <button class="btn btn--quiet btn--sm" id="btnCopyPortal">${icon('external')} 复制</button>
+        </div>
+        <div class="row mt14" style="gap:8px;flex-wrap:wrap">
+          <a class="btn btn--primary" href="#portal">进入使用界面 ${icon('arrowRight')}</a>
+          <button class="btn btn--ghost btn--sm" id="btnGoLiveOff">暂停使用</button>
+        </div>
+        <p class="fs11 muted mt10" style="line-height:1.6">暂停后员工打开门户会看到「暂未开放」，已入库的资料、助手配置都不会动，随时可以再开。</p>
+      </div>`;
+    }
+
+    return `<div class="golive">
+      <div class="golive__head">
+        <span class="golive__ico golive__ico--wait">${icon('play')}</span>
+        <div style="flex:1;min-width:0">
+          <b class="fs13">交付完成，等你按下开关</b>
+          <p class="fs11 muted" style="line-height:1.65;margin:3px 0 0">十步走完只能说明系统配好了，员工那边还关着。按下开启，员工门户才对全公司开放。</p>
+        </div>
+        <span class="badge">未开启</span>
+      </div>
+      <div class="golive__checks">
+        ${checks.map((c) => `<div class="golive__check ${c.ok ? 'is-ok' : 'is-missing'}">
+          <span class="golive__check-ico">${c.ok ? icon('checkCircle') : icon('alert')}</span>
+          <span class="golive__check-label">${esc(c.label)}</span>
+          <em>${esc(c.hint)}</em>
+        </div>`).join('')}
+      </div>
+      <div class="row mt14" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn--primary" id="btnGoLive" ${ready ? '' : 'disabled'}>开启使用 ${icon('arrowRight')}</button>
+        <a class="btn btn--ghost btn--sm" href="#portal">先预览员工界面</a>
+        ${ready ? '' : `<span class="fs11 muted">还有 ${checks.filter((c) => !c.ok).length} 项没满足，补齐后按钮才会亮</span>`}
+      </div>
+    </div>`;
+  }
+
+  function askGoLive() {
+    const checks = goLiveChecks();
+    const miss = checks.filter((c) => !c.ok);
+    if (miss.length) {
+      toast(`还不能开启：${miss.map((c) => c.label + '（' + c.hint + '）').join('、')}`, 'warn');
+      return;
+    }
+    const link = portalLink();
+    modal({
+      title: '开启使用',
+      desc: '开启后，员工用下面的地址就能提问了。',
+      wide: true,
+      body: `<div class="stack">
+        <div class="golive__link" style="margin:0">
+          <span class="golive__link-label">员工入口</span>
+          <code>${esc(link)}</code>
+        </div>
+        <div class="note" style="margin:0">${icon('info')}<span>员工只会看到问答界面，看不到资料库、模型配置和后台。答不上来的问题会攒起来给你，不会瞎编。</span></div>
+      </div>`,
+      okText: '开启使用',
+      onOk: async () => {
+        try {
+          await setLive(true);
+          toast('已开启，员工可以开始用了');
+          return true;
+        } catch (e) {
+          toast(e.message || '开启失败', 'warn');
+          return false;
+        }
+      },
+    });
+  }
+
+  function askGoLiveOff() {
+    modal({
+      title: '暂停使用',
+      desc: '员工将暂时打不开门户，配置和数据都保留。',
+      body: `<div class="note" style="margin:0">${icon('info')}<span>已经入库的资料、助手范围和测试记录都不会动。需要时再点一次「开启使用」就能恢复。</span></div>`,
+      okText: '暂停使用',
+      cancelText: '算了',
+      onOk: async () => {
+        try {
+          await setLive(false);
+          toast('已暂停，员工暂时打不开门户');
+          return true;
+        } catch (e) {
+          toast(e.message || '暂停失败', 'warn');
+          return false;
+        }
+      },
+    });
+  }
+
+  async function setLive(on) {
+    const by = S.user.name || '';
+    let live;
+    if (window.LIVE && window.LIVE.on && window.LIVE.clientId) {
+      /* 服务端是唯一真相：它会再核一遍十步、助手、知识库 */
+      const r = await window.API.goLive(window.LIVE.clientId, on, by);
+      if (r.error) {
+        const extra = (r.blockers || []).map((b) => b.msg).join('、');
+        throw new Error(extra ? `${r.error}：${extra}` : r.error);
+      }
+      live = r.live;
+    } else {
+      live = { on, at: new Date().toISOString(), by };
+    }
+    S.project.live = live;
+    TM.save();
+    if (window.LIVE && window.LIVE.on) window.LIVE.syncSoon();
+    logAct(on ? '开启使用 · 员工门户已开放' : '暂停使用 · 员工门户已关闭');
+    syncChrome();
+    router();
   }
 
   /* ---------------------------------------------------------------------
@@ -2263,6 +2521,7 @@
   let testFilter = 'key';   // key | all
   let testAsstId = null;    // 用哪个助手跑测试，null = 通用（全部资料）
   let portalAsstId = null;  // 员工门户当前选中的助手
+  let portalPreview = false; // 未开启使用时的「先看一眼」预览态
 
   function testStats() {
     const run = S.project.testRun;
@@ -4373,6 +4632,37 @@
 
   function renderPortal(root) {
     const liveOn = !!(window.LIVE && window.LIVE.on);
+
+    /* 没开启使用之前，员工门户是关着的——不然「十步走完」和「员工能用」
+     * 就成了同一件事，客户会以为交付完系统自己就上线了。
+     * 管理员可以预览，但页面顶上会有一条明显的预览条。 */
+    if (liveOn && !isLiveOn() && !portalPreview) {
+      const prog = TM.progress();
+      const allDone = prog.done >= STEPS.length;
+      const link = portalLink();
+      root.innerHTML = `<div class="page">
+        ${pageHead('员工门户', '员工在这里提问，答案标出处。现在还没开放。', '')}
+        <div class="card card--pad locked-portal">
+          <span class="locked-portal__ico">${icon('lock')}</span>
+          <h2>员工门户还没开放</h2>
+          <p>${allDone
+            ? '系统已经配好了，但还没开放。需要管理员在项目向导第 10 步按下「开启使用」，员工才能打开这个地址提问。'
+            : `项目还在实施中，还剩 ${STEPS.length - prog.done} 步。走完第 10 步「正式交付」并由管理员开启后，这个地址才能用。`}</p>
+          <div class="locked-portal__link">
+            <span class="fs11 muted">将来员工打开的地址</span>
+            <code>${esc(link)}</code>
+          </div>
+          <div class="row mt16" style="justify-content:center;gap:8px;flex-wrap:wrap">
+            <a class="btn btn--primary" href="#wizard/10">${allDone ? '去第 10 步开启使用' : '回到项目向导'} ${icon('arrowRight')}</a>
+            <button class="btn btn--ghost" id="btnPreviewPortal">先预览界面</button>
+          </div>
+          <p class="fs11 muted mt14" style="line-height:1.6">预览只是给你看效果：员工看不到资料库、模型配置和后台，也不能改任何东西。</p>
+        </div>
+      </div>`;
+      const pv = qi('#btnPreviewPortal');
+      if (pv) pv.onclick = () => { portalPreview = true; renderPortal(root); };
+      return;
+    }
     const asstList = liveOn ? (window.LIVE.assistants || []) : [];
     if (liveOn && portalAsstId && !asstList.some((a) => a.id === portalAsstId)) portalAsstId = null;
     const curAsst = asstList.find((a) => a.id === portalAsstId) || asstList[0] || null;
@@ -4404,6 +4694,11 @@
     const who = (S.user && S.user.initial) || orgName.slice(0, 1);
 
     root.innerHTML = `<div class="page">
+      ${(!isLiveOn() && portalPreview) ? `<div class="preview-bar">
+        ${icon('eye')}
+        <span><b>预览模式</b> · 这是员工将看到的界面，还没正式开放。员工现在打开链接会看到「暂未开放」。</span>
+        <a href="#wizard/10">去开启使用 ${icon('arrowRight')}</a>
+      </div>` : ''}
       ${pageHead('员工门户', '这是你团队员工看到的界面。他们不需要理解知识库、切片、模型，只需要问问题。',
         `<button class="btn btn--ghost btn--sm" id="btnCopyLink">${icon('external')} 复制门户链接</button>`)}
 

@@ -1231,6 +1231,39 @@ async function route(req, res, url) {
     return sendJSON(res, 200, { state: st });
   }
 
+  /* --- 开启/暂停使用：交付完成后由客户自己按下的开关 ---
+   * 不能只靠前端状态。员工是真的会打开这个链接提问的，
+   * 所以这里再核一遍：十步都完成、有助手、知识库真有切片。
+   * 缺任何一项就不给开，返回缺什么，前端照着提示去补。 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/go-live$/)) && method === 'POST') {
+    requireClient(m[1]);
+    const b = await readJSONBody(req);
+    const st = ensureState(m[1]);
+    const project = st.project || {};
+    const live = project.live || null;
+    const on = b.on !== false;
+    const at = new Date().toISOString();
+    const by = String(b.by || '').slice(0, 40);
+
+    if (on) {
+      const steps = project.steps || {};
+      const doneN = Object.keys(steps).filter((k) => steps[k] && steps[k].done).length;
+      const asst = Array.isArray(st.assistants) ? st.assistants.length : 0;
+      const chunks = (getIndex(m[1]) || {}).chunks?.length || 0;
+      const blockers = [];
+      if (doneN < 10) blockers.push({ key: 'steps', msg: `还有 ${10 - doneN} 个步骤没完成` });
+      if (!asst) blockers.push({ key: 'assistants', msg: '还没有创建 AI 助手' });
+      if (!chunks) blockers.push({ key: 'kb', msg: '知识库还没建好' });
+      if (blockers.length) {
+        return sendJSON(res, 409, { error: '还不能开启使用', blockers, live });
+      }
+    }
+
+    st.project = { ...project, live: { on, at, by } };
+    saveState(m[1], st);
+    return sendJSON(res, 200, { ok: true, live: st.project.live });
+  }
+
   /* --- 客户成员：后台和客户端共用同一份，改完立刻落盘 --- */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/members$/)) && method === 'GET') {
     requireClient(m[1]);

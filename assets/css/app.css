@@ -1055,3 +1055,91 @@ table{border-collapse:collapse;width:100%}
   /* 门户双栏布局在窄屏堆叠为单栏，避免左栏被压成竖条 */
   .portal-grid{grid-template-columns:1fr;gap:14px}
 }
+
+/* ==========================================================================
+   开启使用（第 10 步交付完成后）
+   交付完成 ≠ 员工能用：这里是一个显式开关，可开可停
+   ========================================================================== */
+.golive{
+  border:1px solid var(--border);border-radius:12px;padding:18px;
+  background:linear-gradient(180deg,#FFFDF8,#FFFFFF);
+}
+.golive.is-on{background:linear-gradient(100deg,#E9F6EF,#F7FCF9);border-color:#C8E8D8}
+.golive__head{display:flex;gap:12px;align-items:flex-start}
+.golive__ico{
+  width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:0 0 34px;
+  background:#fff;color:var(--success);box-shadow:0 1px 3px rgba(30,142,90,.18);
+}
+.golive__ico svg{width:17px;height:17px}
+.golive__ico--wait{color:var(--brand);background:var(--brand-50);box-shadow:none}
+.golive__head .badge{margin-left:auto;flex:0 0 auto}
+
+.golive__checks{margin-top:14px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+/* 检查格子有底色，按钮紧贴上去会糊成一块 */
+.golive__checks + .row{margin-top:18px}
+.golive__check{
+  display:flex;align-items:center;gap:7px;font-size:12px;padding:8px 10px;
+  border-radius:8px;background:var(--surface-2);border:1px solid transparent;
+}
+.golive__check-ico{display:grid;place-items:center;flex:0 0 13px;color:var(--text-3)}
+.golive__check-ico svg{width:13px;height:13px}
+.golive__check.is-ok .golive__check-ico{color:var(--success)}
+.golive__check.is-missing{background:var(--warn-bg);border-color:#F0DCB4}
+.golive__check.is-missing .golive__check-ico{color:var(--warn)}
+.golive__check-label{color:var(--text-2)}
+.golive__check em{margin-left:auto;font-style:normal;font-size:11px;color:var(--text-4);white-space:nowrap}
+
+.golive__link{
+  display:flex;align-items:center;gap:8px;margin-top:14px;padding:8px 10px;
+  border-radius:8px;background:var(--surface-2);border:1px solid var(--border);min-width:0;
+}
+.golive__link-label{font-size:11px;color:var(--text-4);flex:0 0 auto}
+.golive__link code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--text-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;
+}
+.golive__link .btn{flex:0 0 auto}
+
+.locked-portal{max-width:620px;margin:0 auto;text-align:center;padding:38px 26px}
+.locked-portal__ico{
+  width:48px;height:48px;border-radius:50%;background:var(--surface-2);color:var(--text-3);
+  display:grid;place-items:center;margin:0 auto 14px;
+}
+.locked-portal__ico svg{width:22px;height:22px}
+.locked-portal h2{font-size:18px;margin-bottom:8px}
+.locked-portal p{font-size:13px;color:var(--text-2);line-height:1.7;max-width:430px;margin:0 auto}
+.locked-portal__link{
+  margin-top:16px;display:inline-flex;flex-direction:column;gap:4px;padding:10px 14px;
+  border-radius:10px;background:var(--surface-2);border:1px solid var(--border);max-width:100%;
+}
+.locked-portal__link code{font-size:11.5px;color:var(--text-2);word-break:break-all;text-align:left}
+
+.preview-bar{
+  display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;margin-bottom:14px;
+  background:var(--warn-bg);border:1px solid #F0DCB4;color:#7A5310;font-size:12px;flex-wrap:wrap;
+}
+.preview-bar > svg{width:14px;height:14px;flex:0 0 14px}
+.preview-bar a{
+  margin-left:auto;color:#7A5310;font-weight:650;text-decoration:underline;
+  display:inline-flex;align-items:center;gap:3px;white-space:nowrap;
+}
+.preview-bar a svg{width:12px;height:12px}
+
+.nav-item__badge--live{background:var(--success);color:#fff}
+
+@media(max-width:620px){
+  .golive{padding:14px}
+  /* 窄屏上徽标会把标题挤成两行、还断在词中间；状态标题里已经写了，不必重复 */
+  .golive__head .badge{display:none}
+  .golive__checks{grid-template-columns:1fr}
+  .golive__link{flex-wrap:wrap}
+  .golive__link code{flex:1 1 100%;order:3;white-space:normal;word-break:break-all}
+  .locked-portal{padding:28px 18px}
+  .locked-portal__link{display:flex;width:100%}
+  .preview-bar a{margin-left:0}
+  /* 底部两个按钮在窄屏不该被挤成竖排单字 */
+  .step-foot{flex-wrap:wrap}
+  .step-foot > .btn{flex:1 1 auto;justify-content:center}
+  /* 窄屏上下方这句「项目已全部完成」会被挤扁，卡片里已经说清楚了 */
+  .step-foot > .badge{display:none}
+}

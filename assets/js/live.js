@@ -121,6 +121,8 @@
           report: srv.project.report || S.project.report || null,
           maintenance: srv.project.maintenance || S.project.maintenance || null,
           accepted: srv.project.accepted || S.project.accepted || null,
+          /* 是否已开启使用：这是服务端为准的开关，本地不能自己推 */
+          live: srv.project.live || S.project.live || null,
         });
       }
       this.firstPaint = false;
@@ -234,6 +236,9 @@
             report: S.project.report || null,
             maintenance: S.project.maintenance || null,
             accepted: S.project.accepted || null,
+            /* 一定要带上：服务端是浅合并，project 整块替换，
+             * 不带 live 就会把「已开启使用」又抹成未开启 */
+            live: S.project.live || null,
           },
         }).catch(() => { });
       }, 600);

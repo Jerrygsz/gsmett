@@ -82,6 +82,8 @@
     client(id) { return this.get(`/api/clients/${id}`); },
     state(id) { return this.get(`/api/clients/${id}/state`); },
     saveState(id, patch) { return this.patch(`/api/clients/${id}/state`, patch); },
+    /* 开启/暂停「客户开始使用」，服务端会复核十步、助手、知识库 */
+    goLive(id, on, by) { return this.post(`/api/clients/${id}/go-live`, { on, by }); },
 
     /* ---------- 资料 ---------- */
     docs(id) { return this.get(`/api/clients/${id}/docs`); },
