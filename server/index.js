@@ -418,25 +418,119 @@ function addUsage(st, usage) {
   st.usage.byDay[day] = (st.usage.byDay[day] || 0) + usage.total;
 }
 
-/* 真正的"答不上来的问题"清单：客户拿这个去补资料。
- * 按问题去重，最多留 30 条，最近的排前面。 */
+/* ---------------- 答不上来的问题：从「记录」变成「待办」 ----------------
+ * 老数据只有 { q, at, n, by }，这里补 id / status 等字段，全部可选，
+ * 所以旧客户的清单读出来照样能用，status 缺省视为 open。
+ * 服务端是唯一真相：live.js 的 syncSoon 不回写 portalGaps，前端改不动它。 */
+/** id 由问题内容算出来，老数据每次读都能得到同一个 id —— GET 不必为了补 id 写盘 */
+function gapId(q) {
+  return 'g_' + crypto.createHash('sha1').update(String(q || '')).digest('hex').slice(0, 10);
+}
+
+function ensureGaps(st) {
+  if (!Array.isArray(st.portalGaps)) st.portalGaps = [];
+  for (const g of st.portalGaps) {
+    if (!g.id) g.id = gapId(g.q);
+    if (!g.status) g.status = 'open';
+    if (g.assignee === undefined) g.assignee = '';
+    if (g.note === undefined) g.note = '';
+  }
+  return st.portalGaps;
+}
+
+/** 匹配问法时忽略标点、空格、大小写，避免「GC25 多少瓦?」和「GC25多少瓦」算两条 */
+function normGap(s) {
+  return String(s || '').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '').slice(0, 120);
+}
+
+function gapStats(list) {
+  const all = Array.isArray(list) ? list : [];
+  const c = { total: all.length, open: 0, assigned: 0, resolved: 0, ignored: 0 };
+  for (const g of all) {
+    const k = g.status || 'open';
+    if (c[k] !== undefined) c[k]++;
+    else c.open++;
+  }
+  const active = c.total - c.ignored;   // 主动忽略的不算待办
+  c.rate = active ? Math.round((c.resolved / active) * 100) : 0;
+  return c;
+}
+
+/** 同一个问题后来答上来了 → 自动销账，但标明是系统判定的，允许人工重新打开 */
+function autoResolveGap(st, question, result, assistantId) {
+  const list = ensureGaps(st);
+  const key = normGap(question);
+  if (!key) return null;
+  // 缺口是某个助手范围内产生的，就只认同一个助手答上来；全库产生的谁答上来都算
+  const hit = list.find((g) => normGap(g.q) === key
+    && !['resolved', 'ignored'].includes(g.status || 'open')
+    && (!g.aid || !assistantId || g.aid === assistantId));
+  if (!hit) return null;
+  const now = new Date().toISOString();
+  hit.status = 'resolved';
+  hit.resolvedAt = now;
+  hit.resolvedBy = 'auto';
+  hit.verify = {
+    at: now, ok: true, by: 'chat',
+    answer: String(result?.answer || '').slice(0, 240),
+    docs: (result?.citations || []).slice(0, 3).map((c) => c.doc),
+  };
+  return hit;
+}
+
 function recordGap(st, question, assistant) {
   const text = String(question || '').trim().slice(0, 120);
   if (!text) return;
-  st.portalGaps = st.portalGaps || [];
-  const hit = st.portalGaps.find((g) => g.q === text);
+  const list = ensureGaps(st);
+  const today = new Date().toISOString().slice(0, 10);
+  const hit = list.find((g) => normGap(g.q) === normGap(text));
   if (hit) {
     hit.n = (hit.n || 1) + 1;
-    hit.at = new Date().toISOString().slice(0, 10);
-    return;
+    hit.at = today;
+    hit.lastAt = today;
+    if (!hit.aid && assistant?.id) hit.aid = assistant.id;
+    // 之前销过账，现在又答不上来 → 自动重新打开，不能让它悄悄消失
+    if (hit.status === 'resolved') {
+      hit.status = 'open';
+      hit.reopenedAt = today;
+      hit.resolvedBy = '';
+      hit.verify = { ...(hit.verify || {}), at: new Date().toISOString(), ok: false, by: 'chat' };
+    }
+    return hit;
   }
-  st.portalGaps.unshift({
-    q: text,
-    at: new Date().toISOString().slice(0, 10),
-    n: 1,
-    by: assistant?.name || '',
+  list.unshift({
+    id: gapId(text),
+    q: text, at: today, n: 1,
+    by: assistant?.name || '', aid: assistant?.id || '',
+    status: 'open', assignee: '', note: '',
   });
-  if (st.portalGaps.length > 30) st.portalGaps.length = 30;
+  if (list.length > 30) list.length = 30;
+}
+
+/**
+ * 拿一个问题真跑一次「检索 + 模型」，只回答"现在能不能答上来"。
+ * 用于缺口任务的「重新验证」——不写提问计数、不再记缺口，由调用方决定落库。
+ */
+async function probeQuestion(id, question, assistantId) {
+  const st = ensureState(id);
+  const idx = getIndex(id);
+  if (!idx) return { error: '知识库尚未构建', gap: true, citations: [], answer: '' };
+
+  const asst = pickAssistant(st, assistantId);
+  const topK = 5;
+  let hits = search(idx.index, idx.chunks, question, asst?.scope?.length ? topK * 4 : topK);
+  if (asst?.scope?.length) hits = filterByScope(hits, asst, getDocs(id)).slice(0, topK);
+  if (!hits.length) return { gap: true, citations: [], answer: '知识库里没有找到相关内容' };
+
+  const cfg = effectiveLLM(st);
+  if (!cfg?.apiKey) return { error: '还没有配置模型 Key，无法验证', gap: true, citations: [], answer: '' };
+  try {
+    const r = await LLM.answerWithRag(cfg, { question, hits, assistant: asst });
+    addUsage(st, r.usage);
+    return { gap: !!r.gap, citations: r.citations, answer: r.answer, model: r.model, ms: r.ms };
+  } catch (e) {
+    return { error: e.message, gap: true, citations: [], answer: '' };
+  }
 }
 
 /* 按助手的资料范围过滤检索结果。scope 为空 = 不限制 */
@@ -2127,7 +2221,7 @@ async function route(req, res, url) {
         hits: 0,
         rewritten: rw.rewritten ? rw.query : null,
         assistant: asst ? { id: asst.id, name: asst.name } : null,
-        gaps: st.portalGaps || [],
+        gaps: ensureGaps(st),
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     }
@@ -2152,10 +2246,15 @@ async function route(req, res, url) {
       const r = await LLM.answerWithRag(cfg, { question: q, hits, assistant: asst, history });
       st.portalAsks = (st.portalAsks || 0) + 1;
       addUsage(st, r.usage);
+      let resolved = null;
       if (r.gap) {
         st.portalMiss = (st.portalMiss || 0) + 1;
-        recordGap(st, searchQ, asst);
+        recordGap(st, searchQ, asst);   // 销过账又答不上来时会自动重新打开
+      } else if ((r.citations || []).length) {
+        // 同一个问题现在答上来了 → 自动销账。改写前后两种问法都试一遍
+        resolved = autoResolveGap(st, searchQ, r, asst?.id) || autoResolveGap(st, q, r, asst?.id);
       }
+      const gaps = ensureGaps(st);
       saveState(id, st);
 
       return sendJSON(res, 200, {
@@ -2168,12 +2267,86 @@ async function route(req, res, url) {
         rewritten: rw.rewritten ? rw.query : null,
         tableMode: LLM.hasTableHits(hits),
         assistant: asst ? { id: asst.id, name: asst.name, scope: asst.scope } : null,
-        gaps: st.portalGaps || [],
+        resolved: resolved ? { id: resolved.id, q: resolved.q } : null,
+        gaps,
+        gapStats: gapStats(gaps),
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     } catch (e) {
       return sendJSON(res, 200, { error: e.message, code: e.code || 'ERROR' });
     }
+  }
+
+  /* --- 缺口任务闭环：查询 / 指派 / 销账 / 忽略 / 重新验证 --- */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/gaps$/)) && method === 'GET') {
+    const id = m[1];
+    requireClient(id);
+    const st = ensureState(id);
+    const gaps = ensureGaps(st);
+    return sendJSON(res, 200, { gaps, stats: gapStats(gaps) });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/gaps\/([\w]+)\/verify$/)) && method === 'POST') {
+    const id = m[1], gid = m[2];
+    requireClient(id);
+    const st = ensureState(id);
+    const gaps = ensureGaps(st);
+    const g = gaps.find((x) => x.id === gid);
+    if (!g) return sendJSON(res, 404, { error: '这条缺口不存在' });
+
+    // 真跑一次检索 + 模型，答得上来才销账；不算员工提问，也不再记缺口
+    // 用当初产生这条缺口的助手口径验证，避免换了范围更宽的助手误判「已经能答」
+    const r = await probeQuestion(id, g.q, g.aid || '');
+    const ok = !r.error && !r.gap && (r.citations || []).length > 0;
+    const now = new Date().toISOString();
+    g.verify = {
+      at: now, ok, by: 'verify',
+      answer: String(r.answer || r.error || '').slice(0, 240),
+      docs: (r.citations || []).slice(0, 3).map((c) => c.doc),
+    };
+    if (ok) {
+      g.status = 'resolved';
+      g.resolvedAt = now;
+      g.resolvedBy = 'verify';
+    } else if (g.status === 'resolved') {
+      g.status = 'open';
+      g.reopenedAt = now.slice(0, 10);
+      g.resolvedBy = '';
+    }
+    saveState(id, st);
+    return sendJSON(res, 200, {
+      ok, gap: g, gaps, stats: gapStats(gaps),
+      answer: r.answer || '', citations: r.citations || [], error: r.error || null,
+    });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/gaps\/([\w]+)$/)) && (method === 'PATCH' || method === 'POST')) {
+    const id = m[1], gid = m[2];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const st = ensureState(id);
+    const gaps = ensureGaps(st);
+    const g = gaps.find((x) => x.id === gid);
+    if (!g) return sendJSON(res, 404, { error: '这条缺口不存在' });
+
+    const ALLOWED = ['open', 'assigned', 'resolved', 'ignored'];
+    if (b.status !== undefined && !ALLOWED.includes(String(b.status))) {
+      return sendJSON(res, 400, { error: '状态值不对' });
+    }
+    const now = new Date().toISOString();
+    if (b.assignee !== undefined) {
+      g.assignee = String(b.assignee).trim().slice(0, 30);
+      if (g.assignee && (g.status || 'open') === 'open') g.status = 'assigned';
+      if (!g.assignee && g.status === 'assigned') g.status = 'open';
+    }
+    if (b.note !== undefined) g.note = String(b.note).trim().slice(0, 200);
+    if (b.status !== undefined) {
+      g.status = String(b.status);
+      if (g.status === 'resolved') { g.resolvedAt = now; g.resolvedBy = 'manual'; }
+      else { g.resolvedAt = ''; g.resolvedBy = ''; }
+    }
+    saveState(id, st);
+    return sendJSON(res, 200, { gap: g, gaps, stats: gapStats(gaps) });
   }
 
   /* --- 测试题 --- */

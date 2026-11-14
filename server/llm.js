@@ -350,11 +350,14 @@ export async function answerWithRag(cfg, { question, hits, assistant, history })
 
   const text = stripEmptyTables((r.content || '').trim());
   /* 模型明确说没有 = 资料缺口。
-   * 以前还要求 hits.length === 0，等于"检索到片段但片段没用"这种情况不算缺口——
-   * 可客户看到的就是"它答不上来"，那就该记进缺口清单。
-   * 加长度上限，避免把"答完正文后附一句'资料没写请联系销售'"误判成缺口。 */
-  const saysNo = /没有找到|未找到|没有相关|没有这部分|无法回答|资料中没有|知识库里没有/.test(text);
-  const isGap = saysNo && text.length < 320;
+   * 以前是「全文出现『没有找到』+ 长度 < 320」就算缺口，实测会误判：
+   * 模型给出一张完整参数表后顺带补一句「另有几个型号没找到单价」，明明答上来了却记成缺口，
+   * 导致门户 miss 虚高、缺口验证也跟着误判。
+   * 改成只看开头 45 字有没有拒答，且回答里没有表格才算缺口。 */
+  const NO_ANSWER = /没有找到|未找到|没有相关|没有这部分|无法回答|资料中没有|知识库里没有|查不到/;
+  const head = text.slice(0, 45);
+  const hasTable = /^\s*\|[^\n]+\|/m.test(text);
+  const isGap = NO_ANSWER.test(head) && text.length < 320 && !hasTable;
 
   return {
     answer: text,

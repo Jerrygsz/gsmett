@@ -442,6 +442,11 @@
       return API.chat(this.clientId, question, extra);
     },
 
+    /* 缺口任务的唯一真相在服务端：syncSoon 不回写 portalGaps，全部走接口 */
+    async gaps() { return API.gaps(this.clientId); },
+    async setGap(gid, patch) { return API.setGap(this.clientId, gid, patch); },
+    async verifyGap(gid) { return API.verifyGap(this.clientId, gid); },
+
     /* ---------------- 成员 ---------------- */
 
     async refreshMembers() {

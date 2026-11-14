@@ -4137,9 +4137,213 @@
       <div class="note note--info mt16">${icon('info')}<span>原始文件保存在企业指定电脑，平台只保存文件名、分类和解析状态。删除资料后，对应切片会在下次重建索引时移除。</span></div>`;
   }
 
+  /* ---------------------------------------------------------------------
+     缺口任务闭环
+     员工在门户问到资料里没有的东西 → 记为待补任务；
+     同一个问题后来答上来了 → 服务端自动销账；
+     管理员在这里指派、忽略、标记已补、重新验证（真跑一次问答）。
+     --------------------------------------------------------------------- */
+  let gapFilter = 'all';   // all | active | resolved
+
+  function gapCount(list) {
+    const c = { total: (list || []).length, open: 0, assigned: 0, resolved: 0, ignored: 0 };
+    for (const g of (list || [])) {
+      const k = g.status || 'open';
+      if (c[k] !== undefined) c[k]++; else c.open++;
+    }
+    const active = c.total - c.ignored;
+    c.rate = active ? Math.round((c.resolved / active) * 100) : 0;
+    return c;
+  }
+
+  function gapStatusLabel(g) {
+    return ({ open: '待补资料', assigned: '已指派', resolved: '已补', ignored: '已忽略' })[g.status || 'open'] || '待补资料';
+  }
+
+  function gapHow(g) {
+    return ({ auto: '系统自动销账', verify: '验证通过销账', manual: '人工标记已补' })[g.resolvedBy] || '';
+  }
+
+  function gapRowHtml(g) {
+    const s = g.status || 'open';
+    const gid = esc(g.id || '');
+    const acts = s === 'resolved'
+      ? `<button class="btn btn--quiet btn--sm" data-gap-act="verify" data-gid="${gid}">复验</button>
+         <button class="btn btn--quiet btn--sm" data-gap-act="reopen" data-gid="${gid}">重新打开</button>`
+      : s === 'ignored'
+        ? `<button class="btn btn--quiet btn--sm" data-gap-act="reopen" data-gid="${gid}">恢复</button>`
+        : `<button class="btn btn--quiet btn--sm" data-gap-act="assign" data-gid="${gid}">指派</button>
+           <button class="btn btn--quiet btn--sm" data-gap-act="verify" data-gid="${gid}">验证</button>
+           <button class="btn btn--quiet btn--sm" data-gap-act="done" data-gid="${gid}">标记已补</button>
+           <button class="btn btn--quiet btn--sm" data-gap-act="ignore" data-gid="${gid}">忽略</button>`;
+    return `<div class="gap-row ${s === 'resolved' ? 'is-done' : ''}">
+      <div class="gap-row__main">
+        <div class="gap-row__q">${esc(g.q)}${g.n > 1 ? ` <span class="fs11 muted">×${g.n}</span>` : ''}</div>
+        <div class="gap-row__meta">
+          <span class="gap-tag gap-tag--${s}">${gapStatusLabel(g)}</span>
+          ${g.assignee ? `<span>指派给 <b>${esc(g.assignee)}</b></span>` : ''}
+          ${gapHow(g) ? `<span>${gapHow(g)}</span>` : ''}
+          ${g.note ? `<span title="${esc(g.note)}">${esc(String(g.note).slice(0, 22))}</span>` : ''}
+          ${g.verify && g.verify.ok === false ? `<span style="color:var(--warn)">最近验证仍答不上来</span>` : ''}
+        </div>
+      </div>
+      <div class="gap-row__acts">${acts}</div>
+    </div>`;
+  }
+
+  function gapPanelHtml() {
+    const gaps = S.portalGaps || [];
+    const c = gapCount(gaps);
+    const list = gaps.filter((g) => {
+      const s = g.status || 'open';
+      if (gapFilter === 'active') return s !== 'resolved' && s !== 'ignored';
+      if (gapFilter === 'resolved') return s === 'resolved';
+      return true;
+    });
+    const tabs = [['all', '全部'], ['active', '待处理'], ['resolved', '已补']];
+    return `<div class="card card--pad mt16" id="gapPanel">
+      <div class="row--between mb12" style="flex-wrap:wrap;gap:10px">
+        <div>
+          <b class="fs13">答不上来的问题 · 补资料任务</b>
+          <div class="fs11 muted mt4">员工真实提问记录；同一个问题后来答上来了会自动销账</div>
+        </div>
+        <div class="gap-stat">
+          <span><b>${c.open + c.assigned}</b> 待处理</span>
+          <span><b>${c.resolved}</b> 已补</span>
+          <span>转化率 <b>${c.rate}%</b></span>
+        </div>
+      </div>
+      <div class="bar mb12" style="height:5px"><div class="bar__fill" style="width:${c.rate}%"></div></div>
+      <div class="gap-filters">
+        ${tabs.map(([k, n]) => `<button class="chip ${gapFilter === k ? 'is-active' : ''}" data-gap-filter="${k}">${n}</button>`).join('')}
+        <span class="fs11 muted" style="margin-left:auto;align-self:center">共 ${gaps.length} 条</span>
+      </div>
+      <div class="stack" style="gap:0">
+        ${list.length ? list.slice(0, 12).map(gapRowHtml).join('')
+          : `<div class="fs12 muted" style="padding:18px 0">${gaps.length ? '这个分类下没有记录。' : '还没有记录。员工问到资料里没有的内容时，会自动出现在这里。'}</div>`}
+      </div>
+      ${list.length > 12 ? `<div class="fs11 muted mt8">还有 ${list.length - 12} 条未显示</div>` : ''}
+    </div>`;
+  }
+
+  /** 局部重画面板，不动配置中心的其他 tab 和内容 */
+  function refreshGapPanel(body) {
+    const old = qi('#gapPanel');
+    if (!old) return;
+    old.outerHTML = gapPanelHtml();
+    bindGapActions(body || old.parentElement);
+  }
+
+  async function gapCall(fn, gid, patch, body) {
+    const L = window.LIVE;
+    if (!(L && L.on)) return toast('需要连上本地服务才能操作缺口任务', 'warn');
+    try {
+      const r = await (fn === 'verify' ? L.verifyGap(gid) : L.setGap(gid, patch));
+      if (r.error) throw new Error(r.error);
+      if (Array.isArray(r.gaps)) S.portalGaps = r.gaps;
+      TM.save();
+      refreshGapPanel(body);
+      return r;
+    } catch (e) {
+      toast('操作失败：' + (e.message || '未知错误'), 'warn');
+      return null;
+    }
+  }
+
+  async function onGapAct(act, gid, body, btn) {
+    const g = (S.portalGaps || []).find((x) => x.id === gid) || { q: '', assignee: '' };
+    if (!(window.LIVE && window.LIVE.on)) return toast('需要连上本地服务才能操作缺口任务', 'warn');
+
+    if (act === 'assign') {
+      return modal({
+        title: '指派补资料', desc: `「${g.q}」由谁来补？`,
+        body: `<input class="input" id="gapAssignee" placeholder="填姓名，例如 李工" value="${esc(g.assignee || '')}">`,
+        okText: '指派',
+        onOk: async (root) => {
+          const who = (root.querySelector('#gapAssignee')?.value || '').trim();
+          if (!who) { toast('请填负责人', 'warn'); return false; }
+          const r = await gapCall('set', gid, { assignee: who }, body);
+          if (r) toast(`已指派给 ${who}`);
+        },
+      });
+    }
+    if (act === 'done') {
+      return modal({
+        title: '标记已补', desc: `「${g.q}」`,
+        body: `<label class="fs12">补了哪份资料 / 怎么处理的（选填）<input class="input mt8" id="gapNote" placeholder="例如：已上传 GC 系列报价单 2026 版" value="${esc(g.note || '')}"></label>`,
+        okText: '确认已补',
+        onOk: async (root) => {
+          const note = (root.querySelector('#gapNote')?.value || '').trim();
+          const r = await gapCall('set', gid, { note, status: 'resolved' }, body);
+          if (r) toast('已标记补完，缺口销账');
+        },
+      });
+    }
+    if (act === 'ignore') {
+      return modal({
+        title: '忽略这条缺口', desc: `「${g.q}」将不再计入待办，也不会销账。以后员工再问到同样的问题，可以恢复。`,
+        okText: '忽略',
+        onOk: async () => {
+          const r = await gapCall('set', gid, { status: 'ignored' }, body);
+          if (r) toast('已忽略');
+        },
+      });
+    }
+    if (act === 'reopen') {
+      const r = await gapCall('set', gid, { status: 'open', assignee: '' }, body);
+      if (r) toast('已重新打开，回到待补清单');
+      return;
+    }
+    if (act === 'verify') {
+      const old = btn ? btn.innerHTML : '';
+      if (btn) { btn.disabled = true; btn.innerHTML = icon('refresh') + ' 验证中…'; }
+      const r = await gapCall('verify', gid, {}, body);
+      if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = old; }
+      if (r) toast(r.ok ? '验证通过：这个问题现在能答上来了，已自动销账' : (r.error || '验证没通过：资料里还是没有答案'), r.ok ? 'ok' : 'warn');
+      return;
+    }
+  }
+
+  function bindGapActions(body) {
+    qa('[data-gap-filter]', body).forEach((b) => b.onclick = () => {
+      gapFilter = b.dataset.gapFilter;
+      refreshGapPanel(body);
+    });
+    qa('[data-gap-act]', body).forEach((b) => b.onclick = () => onGapAct(b.dataset.gapAct, b.dataset.gid, body, b));
+  }
+
+  /** 员工门户右侧：只读状态，让员工看到「我问过的问题补上了」 */
+  function portalGapListHtml(gaps) {
+    const list = gaps || [];
+    if (!list.length) return `<div class="fs11 muted">员工问过但资料里没有的问题会记在这里，可以照着这份清单补资料。</div>`;
+    return list.slice(0, 5).map((g) => {
+      const done = (g.status || 'open') === 'resolved';
+      return `<div class="gap-mini ${done ? 'is-done' : ''}">
+        <span class="gap-mini__ico">${icon(done ? 'checkCircle' : 'help')}</span>
+        <span class="gap-mini__q">${esc(g.q)}${g.n > 1 ? ` <span class="fs11 muted">×${g.n}</span>` : ''}</span>
+        ${done ? `<span class="gap-mini__done">已补</span>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function refreshPortalGapWidget() {
+    const box = qi('#gapList');
+    if (!box) return;
+    const gaps = S.portalGaps || [];
+    const c = gapCount(gaps);
+    box.innerHTML = portalGapListHtml(gaps);
+    const badge = qi('#gapPendingBadge');
+    if (badge) {
+      const pending = c.open + c.assigned;
+      badge.textContent = pending;
+      badge.className = 'badge ' + (pending ? 'badge--warn' : '');
+    }
+    const rate = qi('#gapRate');
+    if (rate) rate.textContent = `已补 ${c.resolved} 条 · 缺口转化率 ${c.rate}%`;
+  }
+
   function cfgAssistant() {
     const list = (window.LIVE && window.LIVE.assistants) || [];
-    const gaps = S.portalGaps || [];
     return `
       <div class="row--between mb16">
         <span class="fs12 muted">共 ${list.length} 个助手 · 配置在第 6 步，会真的进入出题与回答</span>
@@ -4164,21 +4368,7 @@
           </div>`).join('')}
       </div>` : `<div class="empty" style="padding:32px 0">${icon('bot')}<p class="fs12">还没有创建助手。点右上角「新建助手」，或到项目向导第 6 步从模板创建。</p></div>`}
 
-      <div class="card card--pad mt16">
-        <div class="row--between mb12">
-          <b class="fs13">答不上来的问题</b>
-          <span class="fs11 muted">员工门户真实记录 · 按次数排序</span>
-        </div>
-        <div class="stack" style="gap:0">
-          ${gaps.length
-            ? gaps.slice(0, 10).map(g => `
-              <div class="row--between" style="padding:10px 0;border-bottom:1px solid var(--border);gap:12px">
-                <span class="fs12 dim">${esc(g.q)}</span>
-                <span class="badge">${g.n || 1} 次</span>
-              </div>`).join('')
-            : `<div class="fs12 muted" style="padding:14px 0">还没有记录。员工问到资料里没有的内容时，会自动出现在这里，可以照着补资料。</div>`}
-        </div>
-      </div>`;
+      ${gapPanelHtml()}`;
   }
 
   function cfgPrompt() {
@@ -4230,6 +4420,17 @@
   }
 
   function bindCfg(body, tab) {
+    bindGapActions(body);   // 缺口任务面板：指派 / 验证 / 销账 / 忽略
+    // 静默拉一次服务端最新清单：别的浏览器里刚产生的缺口，这边也能立刻看到
+    if (tab === 'assistant' && window.LIVE && window.LIVE.on) {
+      window.LIVE.gaps().then((r) => {
+        if (r && Array.isArray(r.gaps)) {
+          S.portalGaps = r.gaps;
+          TM.save();
+          refreshGapPanel(body);
+        }
+      }).catch(() => { });
+    }
     const cem = qi('#cfgEditModel');
     if (cem) cem.onclick = () => { location.hash = '#wizard/5'; toast('到第 5 步更换模型或 Key'); };
 
@@ -4760,6 +4961,7 @@
     /* 答不上来的问题：真的记录员工问过、库里也确实没有的，
      * 以前这里是写死的三条示例，客户会以为系统在替别人算账 */
     const gaps = liveOn ? (S.portalGaps || []) : [];
+    const gc = gapCount(gaps);
     const orgName = (S.org && (S.org.short || S.org.name)) || '企业';
     const who = (S.user && S.user.initial) || orgName.slice(0, 1);
 
@@ -4827,18 +5029,12 @@
 
           <div class="card card--pad">
             <div class="row--between mb12">
-              <b class="fs12">答不上来的问题</b>
-              <span class="badge ${gaps.length ? 'badge--warn' : ''}">${gaps.length}</span>
+              <b class="fs12">待补资料</b>
+              <span class="badge ${(gc.open + gc.assigned) ? 'badge--warn' : ''}" id="gapPendingBadge">${gc.open + gc.assigned}</span>
             </div>
-            <div class="stack" style="gap:10px" id="gapList">
-              ${gaps.length ? gaps.slice(0, 5).map(g => `
-                <div style="font-size:12px;color:var(--text-2);display:flex;gap:7px;line-height:1.5">
-                  <span style="color:var(--warn);flex:0 0 auto;display:flex;margin-top:2px">${icon('help')}</span>
-                  <span>${esc(g.q)}${g.n > 1 ? ` <span class="fs11 muted">×${g.n}</span>` : ''}</span>
-                </div>`).join('')
-                : `<div class="fs11 muted">员工问过但资料里没有的问题会记在这里，可以照着这份清单补资料。</div>`}
-            </div>
-            ${gaps.length > 5 ? `<div class="fs11 muted mt8">还有 ${gaps.length - 5} 条，见第 8 步</div>` : ''}
+            <div class="stack" style="gap:10px" id="gapList">${portalGapListHtml(gaps)}</div>
+            <div class="fs11 muted mt8" id="gapRate">已补 ${gc.resolved} 条 · 缺口转化率 ${gc.rate}%</div>
+            ${gaps.length > 5 ? `<div class="fs11 muted mt6">还有 ${gaps.length - 5} 条，管理员可在配置中心处理</div>` : ''}
           </div>
 
           <div class="note" style="background:var(--surface-2)">
@@ -4907,7 +5103,7 @@
           }
           turn.rewritten = res.rewritten || '';
 
-          // 计数以服务端为准
+          // 计数与缺口清单都以服务端为准（syncSoon 不回写 portalGaps）
           if (res.stats) {
             S.portalAsks = res.stats.asks || 0;
             S.portalMiss = res.stats.miss || 0;
@@ -4915,6 +5111,12 @@
             S.portalAsks = (S.portalAsks || 0) + 1;
             if (turn.gap) S.portalMiss = (S.portalMiss || 0) + 1;
           }
+          if (Array.isArray(res.gaps)) {
+            S.portalGaps = res.gaps;
+            TM.save();
+            refreshPortalGapWidget();
+          }
+          if (res.resolved) toast('这个问题现在能答上来了，缺口已自动销账');
           TM.save();
           window.LIVE.syncSoon();
         } catch (e) {

@@ -128,6 +128,11 @@
     /* ---------- 问答 ---------- */
     chat(id, question, extra) { return this.post(`/api/clients/${id}/chat`, { question, ...(extra || {}) }, { timeout: 90000 }); },
 
+    /* ---------- 缺口任务闭环 ---------- */
+    gaps(id) { return this.get(`/api/clients/${id}/gaps`); },
+    setGap(id, gid, patch) { return this.patch(`/api/clients/${id}/gaps/${gid}`, patch); },
+    verifyGap(id, gid) { return this.post(`/api/clients/${id}/gaps/${gid}/verify`, {}, { timeout: 90000 }); },
+
     /* ---------- 测试 ---------- */
     genTests(id, count, assistantId) { return this.post(`/api/clients/${id}/tests/generate`, { count, assistantId }); },
     getTests(id) { return this.get(`/api/clients/${id}/tests`); },
