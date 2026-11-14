@@ -2522,6 +2522,9 @@
   let testAsstId = null;    // 用哪个助手跑测试，null = 通用（全部资料）
   let portalAsstId = null;  // 员工门户当前选中的助手
   let portalPreview = false; // 未开启使用时的「先看一眼」预览态
+  /* 员工门户的会话记录。放在渲染函数外面，页面重绘（切助手、改数据）时不会丢，
+   * 同时也是发给服务端做追问改写的上下文来源。 */
+  let portalTurns = [];
 
   function testStats() {
     const run = S.project.testRun;
@@ -4630,6 +4633,73 @@
   /* 演示问答库已清空：员工门户只走真实检索 + 模型，不再内置别人的产品答案 */
   const QA_BANK = [];
 
+  /**
+   * 把模型返回的 Markdown 安全地渲染成聊天气泡 HTML。
+   * 重点处理表格：参数表 / 报价单命中的回答会带 Markdown 表格，
+   * 不能像以前那样 esc + 换行，否则员工看到的是一堆竖线。
+   * 先转义再解析，模型输出里夹的 HTML 标签一律当文本，不留 XSS 口子。
+   */
+  function renderAnswer(md) {
+    const inline = (s) => esc(String(s || ''))
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/`(.+?)`/g, '<code>$1</code>');
+    const lines = String(md || '').replace(/\r/g, '').split('\n');
+    const blocks = [];
+    let para = [];
+    const flush = () => {
+      if (!para.length) return;
+      blocks.push(`<div class="md-p">${para.map(inline).join('<br>')}</div>`);
+      para = [];
+    };
+    const cells = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+
+    for (let i = 0; i < lines.length; i++) {
+      const cur = lines[i].trim();
+      const nxt = (lines[i + 1] || '').trim();
+      // 表头 + 分隔行，才认定是表格
+      if (cur.startsWith('|') && /^\|[\s:|\-]+$/.test(nxt) && nxt.includes('-')) {
+        flush();
+        const head = cells(lines[i]);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].trim().startsWith('|')) {
+          rows.push(cells(lines[i]));
+          i++;
+        }
+        const th = head.map((c) => `<th>${inline(c)}</th>`).join('');
+        const tb = rows.map((r) => `<tr>${head.map((_, k) => `<td>${inline(r[k] || '')}</td>`).join('')}</tr>`).join('');
+        blocks.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`);
+        i--; // for 循环的 i++ 会把当前行再跳一次，这里补回来
+        continue;
+      }
+      if (!cur) { flush(); continue; }
+      para.push(cur);
+    }
+    flush();
+    return blocks.join('');
+  }
+
+  /** 一轮问答渲染成两条气泡；重绘页面时用它回放整段会话 */
+  function turnHtml(t, who, includeUser = true) {
+    const cites = t.cite && t.cite.length
+      ? `<div class="msg__cite">${t.cite.map((c) => `<span>${icon('file')}${esc(c)}</span>`).join('')}</div>`
+      : (t.noCite ? '' : `<div class="msg__cite"><span style="border-color:#F0DFC0;color:var(--warn);background:var(--warn-bg)">${icon('alert')}知识库无相关资料</span></div>`);
+    const userMsg = includeUser
+      ? `<div class="msg msg--user"><span class="msg__av">${esc(who)}</span><div class="msg__bubble">${esc(t.q)}</div></div>`
+      : '';
+    return `${userMsg}<div class="msg"><span class="msg__av">智</span><div class="msg__bubble">${t.a || ''}${t.rewritten ? `<div class="msg__rewrite">接着上一轮理解为：${esc(t.rewritten)}</div>` : ''}${cites}</div></div>`;
+  }
+
+  /** 发给服务端的对话上下文：只要最近三轮，回答截断，别把整段历史塞进 token */
+  function portalHistory() {
+    const h = [];
+    for (const t of portalTurns.slice(-3)) {
+      if (t.q) h.push({ role: 'user', content: String(t.q).slice(0, 300) });
+      if (t.plain) h.push({ role: 'assistant', content: String(t.plain).slice(0, 400) });
+    }
+    return h.slice(-6);
+  }
+
   function renderPortal(root) {
     const liveOn = !!(window.LIVE && window.LIVE.on);
 
@@ -4716,6 +4786,9 @@
               <select class="select" id="portalAsst" style="max-width:190px;height:30px;font-size:11.5px" title="切换助手">
                 ${asstList.map((a) => `<option value="${esc(a.id)}" ${a.id === portalAsstId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
               </select>` : `<span class="badge badge--success badge--dot">在线</span>`}
+            <button class="portal-newchat" id="btnNewChat" title="开始新对话（清空上面的追问上下文）" ${portalTurns.length ? '' : 'disabled'}>
+              ${icon('refresh')}<span>新对话</span>
+            </button>
           </div>
 
           <div class="portal-chat__body" id="chatBody">
@@ -4723,9 +4796,10 @@
               <span class="msg__av">${esc(who)}</span>
               <div class="msg__bubble">
                 你好，我是${esc(orgName)}的内部资料助手。产品参数、报价流程、售后政策都可以问我，我会标出答案来自哪份文件。<br><br>
-                <span class="muted" style="font-size:12px">如果是资料里没有的内容，我会直接告诉你没有，不会猜。</span>
+                <span class="muted" style="font-size:12px">可以接着上一句直接追问，不用把型号再写一遍。资料里没有的内容，我会直接说没有，不会猜。</span>
               </div>
             </div>
+            ${portalTurns.map((t) => turnHtml(t, who)).join('')}
           </div>
 
           <div class="portal-chat__foot">
@@ -4734,7 +4808,7 @@
               ${hot.map(q => `<button class="chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}
             </div>` : ''}
             <div class="chat-input">
-              <input class="input" id="chatInput" placeholder="输入你的问题，例如：这个型号配几块电池？">
+              <input class="input" id="chatInput" placeholder="输入问题，也可以直接追问：那它呢？">
               <button class="btn btn--primary" id="btnSend" style="width:44px;padding:0">${icon('send')}</button>
             </div>
           </div>
@@ -4777,6 +4851,8 @@
 
     const body = qi('#chatBody');
     const input = qi('#chatInput');
+    // 页面重绘后回放历史会话，视野停在最新一条
+    if (portalTurns.length) body.scrollTop = body.scrollHeight;
 
     function pushUser(text) {
       body.insertAdjacentHTML('beforeend', `<div class="msg msg--user"><span class="msg__av">${esc(who)}</span><div class="msg__bubble">${esc(text)}</div></div>`);
@@ -4801,40 +4877,35 @@
     }
 
     async function send(text) {
-      if (!text.trim()) return;
-      pushUser(text);
+      const q = String(text || '').trim();
+      if (!q) return;
+      pushUser(q);
       input.value = '';
       const typing = pushTyping();
 
-      let r;
-      if (window.LIVE && window.LIVE.on) {
-        /* 真实问答：检索 + 模型生成 */
-        try {
-          const res = await window.LIVE.ask(text, portalAsstId);
-          typing.remove();
+      /* 一轮问答先攒成对象：既用于渲染，也用于页面重绘时回放、发给服务端做追问改写 */
+      const turn = { q, a: '', plain: '', cite: [], gap: false, rewritten: '', noCite: false };
+      let failed = '';
 
-          if (res.error) {
-            body.insertAdjacentHTML('beforeend', `<div class="msg"><span class="msg__av">智</span><div class="msg__bubble" style="color:var(--danger)">调用模型失败：${esc(res.error)}</div></div>`);
-            body.scrollTop = body.scrollHeight;
-            return;
-          }
+      if (window.LIVE && window.LIVE.on) {
+        /* 真实问答：追问改写 → 检索 → 模型生成 */
+        try {
+          const res = await window.LIVE.ask(q, portalAsstId, portalHistory());
+          typing.remove();
+          if (res.error) throw new Error(res.error);
 
           if (res.needLLM) {
-            const cites = (res.citations || []).map(c => `${c.doc}${c.page ? ' · P.' + c.page : ''}`);
             const snippet = (res.citations || []).slice(0, 3)
               .map(c => `<div style="margin-top:6px;padding:7px 9px;background:var(--surface-2);border-radius:6px;font-size:11.5px;line-height:1.6">${esc((c.snippet || '').slice(0, 150))}</div>`).join('');
-            r = {
-              a: `${esc(res.message || '')}${snippet}`,
-              cite: cites,
-              gap: false,
-            };
+            turn.a = `<div class="md-p">${esc(res.message || '')}</div>${snippet}`;
+            turn.cite = (res.citations || []).map(c => `${c.doc}${c.page ? ' · P.' + c.page : ''}`);
           } else {
-            r = {
-              a: esc(res.answer || '').replace(/\n/g, '<br>'),
-              cite: (res.citations || []).map(c => `${c.doc}${c.page ? ' · P.' + c.page : ''}`),
-              gap: !!res.gap,
-            };
+            turn.a = renderAnswer(res.answer || '');
+            turn.plain = res.answer || '';
+            turn.cite = (res.citations || []).map(c => `${c.doc}${c.page ? ' · P.' + c.page : ''}`);
+            turn.gap = !!res.gap;
           }
+          turn.rewritten = res.rewritten || '';
 
           // 计数以服务端为准
           if (res.stats) {
@@ -4842,44 +4913,61 @@
             S.portalMiss = res.stats.miss || 0;
           } else {
             S.portalAsks = (S.portalAsks || 0) + 1;
-            if (r.gap) S.portalMiss = (S.portalMiss || 0) + 1;
+            if (turn.gap) S.portalMiss = (S.portalMiss || 0) + 1;
           }
           TM.save();
           window.LIVE.syncSoon();
         } catch (e) {
           typing.remove();
-          body.insertAdjacentHTML('beforeend', `<div class="msg"><span class="msg__av">智</span><div class="msg__bubble" style="color:var(--danger)">请求失败：${esc(e.message)}</div></div>`);
-          body.scrollTop = body.scrollHeight;
-          return;
+          failed = e.message || '请求失败';
         }
       } else {
         await sleep(680 + Math.random() * 420);
         typing.remove();
-        r = answer(text);
+        const d = answer(q);
+        turn.a = `<div class="md-p">${d.a}</div>`;
+        turn.plain = String(d.a || '').replace(/<br>/g, ' ');
+        turn.cite = d.cite || [];
+        turn.gap = !!d.gap;
         S.portalAsks = (S.portalAsks || 0) + 1;
-        if (r.gap) S.portalMiss = (S.portalMiss || 0) + 1;
+        if (turn.gap) S.portalMiss = (S.portalMiss || 0) + 1;
         TM.save();
       }
+
+      if (failed) {
+        turn.a = `<div class="md-p" style="color:var(--danger)">请求失败：${esc(failed)}</div>`;
+        turn.noCite = true;
+      }
+      portalTurns.push(turn);
+
       const an = qi('#askNum'), mn = qi('#missNum'), ab = qi('#accBar'), at = qi('#accTxt');
       if (an) an.textContent = S.portalAsks;
       if (mn) mn.textContent = S.portalMiss || 0;
-      const acc = Math.round((1 - (S.portalMiss || 0) / S.portalAsks) * 100);
+      const acc = Math.round((1 - (S.portalMiss || 0) / (S.portalAsks || 1)) * 100);
       if (ab) ab.style.width = acc + '%';
       if (at) at.textContent = `回答准确率 ${acc}%`;
 
-      const cites = r.cite.length
-        ? `<div class="msg__cite">${r.cite.map(c => `<span>${icon('file')}${esc(c)}</span>`).join('')}</div>`
-        : `<div class="msg__cite"><span style="border-color:#F0DFC0;color:var(--warn);background:var(--warn-bg)">${icon('alert')}知识库无相关资料</span></div>`;
-      body.insertAdjacentHTML('beforeend', `<div class="msg"><span class="msg__av">智</span><div class="msg__bubble">${r.a}${cites}</div></div>`);
+      body.insertAdjacentHTML('beforeend', turnHtml(turn, who, false));
       body.scrollTop = body.scrollHeight;
+      const nb = qi('#btnNewChat');
+      if (nb) nb.disabled = false;
     }
 
     qi('#btnSend').onclick = () => send(input.value);
 
-    // 切换助手：换个岗位问，回答的口吻和资料范围跟着变
+    const nc = qi('#btnNewChat');
+    if (nc) nc.onclick = () => {
+      portalTurns = [];
+      renderPortal(root);
+      toast('已开始新对话，下面的提问不带之前的上下文');
+    };
+
+    // 切换助手：换个岗位问，回答的口吻和资料范围跟着变。
+    // 上下文必须一起清掉，否则新助手会带着上一个助手的回答继续聊。
     const pa = qi('#portalAsst');
     if (pa) pa.onchange = () => {
       portalAsstId = pa.value;
+      portalTurns = [];
       const a = (window.LIVE.assistants || []).find((x) => x.id === portalAsstId);
       renderPortal(root);
       toast(a ? `已切到「${a.name}」${a.scope?.length ? ` · 只查 ${a.scope.join('/')}` : ''}` : '已切换助手');

@@ -2088,18 +2088,34 @@ async function route(req, res, url) {
     const idx = getIndex(id);
     if (!idx) return sendJSON(res, 400, { error: '知识库尚未构建' });
 
+    // 员工传来的最近几轮对话。限量、限字，避免有人把整个聊天记录塞进来
+    const history = (Array.isArray(b.history) ? b.history : []).slice(-6).map((h) => ({
+      role: h?.role === 'user' ? 'user' : 'assistant',
+      content: String(h?.content || '').slice(0, 400),
+    })).filter((h) => h.content);
+
     // 助手决定"以谁的口吻、查哪些资料"——这是第 6 步配置真正生效的地方
     const asst = pickAssistant(st, b.assistantId);
+    const cfg = effectiveLLM(st);
     const topK = b.topK || 5;
+
+    /* 多轮对话的关键：不能拿「那它能给笔记本充吗」这种指代句去检索。
+     * 先把追问改写成独立问题用于检索，回答时仍用员工原话 + 历史上下文。
+     * 改写失败一律降级回原句，追问不会因为改写出错而答不出来。 */
+    let rw = { query: q, rewritten: false, usage: null };
+    if (cfg?.apiKey && history.length) rw = await LLM.rewriteFollowup(cfg, q, history);
+    const searchQ = rw.query || q;
+    if (rw.usage) addUsage(st, rw.usage);
+
     // 限定了范围就多取一些候选，过滤完再截断，避免过滤后不够用
-    let hits = search(idx.index, idx.chunks, q, asst?.scope?.length ? topK * 4 : topK);
+    let hits = search(idx.index, idx.chunks, searchQ, asst?.scope?.length ? topK * 4 : topK);
     if (asst?.scope?.length) hits = filterByScope(hits, asst, getDocs(id)).slice(0, topK);
 
     // 没检索到就直接告知，不浪费模型调用
     if (!hits.length) {
       st.portalAsks = (st.portalAsks || 0) + 1;
       st.portalMiss = (st.portalMiss || 0) + 1;
-      recordGap(st, q, asst);
+      recordGap(st, searchQ, asst);
       saveState(id, st);
       const scoped = asst?.scope?.length
         ? `「${asst.name}」只查 ${asst.scope.join('、')} 这几类资料，这个问题可能落在它的范围外。`
@@ -2109,13 +2125,13 @@ async function route(req, res, url) {
         citations: [],
         gap: true,
         hits: 0,
+        rewritten: rw.rewritten ? rw.query : null,
         assistant: asst ? { id: asst.id, name: asst.name } : null,
         gaps: st.portalGaps || [],
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     }
 
-    const cfg = effectiveLLM(st);
     if (!cfg?.apiKey) {
       // 没配模型：只给检索结果，不编回答
       st.portalAsks = (st.portalAsks || 0) + 1;
@@ -2127,17 +2143,18 @@ async function route(req, res, url) {
           doc: h.chunk.doc, page: h.chunk.page, score: h.score, snippet: h.chunk.text.slice(0, 160),
         })),
         message: '知识库里找到了相关内容，但还没有配置模型，无法生成自然语言回答。到第 5 步填入 API Key 即可。',
+        rewritten: rw.rewritten ? rw.query : null,
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     }
 
     try {
-      const r = await LLM.answerWithRag(cfg, { question: q, hits, assistant: asst });
+      const r = await LLM.answerWithRag(cfg, { question: q, hits, assistant: asst, history });
       st.portalAsks = (st.portalAsks || 0) + 1;
       addUsage(st, r.usage);
       if (r.gap) {
         st.portalMiss = (st.portalMiss || 0) + 1;
-        recordGap(st, q, asst);
+        recordGap(st, searchQ, asst);
       }
       saveState(id, st);
 
@@ -2148,6 +2165,8 @@ async function route(req, res, url) {
         usage: r.usage,
         ms: r.ms,
         model: r.model,
+        rewritten: rw.rewritten ? rw.query : null,
+        tableMode: LLM.hasTableHits(hits),
         assistant: asst ? { id: asst.id, name: asst.name, scope: asst.scope } : null,
         gaps: st.portalGaps || [],
         stats: { asks: st.portalAsks, miss: st.portalMiss },

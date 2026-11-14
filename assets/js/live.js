@@ -434,8 +434,12 @@
 
     /* ---------------- 问答 ---------------- */
 
-    async ask(question, assistantId) {
-      return API.chat(this.clientId, question, assistantId ? { assistantId } : {});
+    async ask(question, assistantId, history) {
+      const extra = {};
+      if (assistantId) extra.assistantId = assistantId;
+      // 最近几轮对话，服务端拿它做追问改写和上下文；不传就是单轮，行为不变
+      if (Array.isArray(history) && history.length) extra.history = history;
+      return API.chat(this.clientId, question, extra);
     },
 
     /* ---------------- 成员 ---------------- */

@@ -166,17 +166,127 @@ const SYSTEM = `你是企业内部的资料问答助手。规则：
 4. 回答简洁，用中文，2-4 句为主。不要罗列"根据资料1、资料2"这类编号。
 5. 不要输出"作为AI"之类的话。`;
 
-export function buildRagMessages(question, hits, assistant = {}) {
+/* ---------------- 多轮对话：把追问改写成能单独检索的问题 ---------------- */
+
+const REWRITE_SYS = `你在做多轮对话的查询改写。把用户最新的一句追问，改写成一句不依赖上下文、能单独拿去检索资料的完整问题。
+
+规则：
+- 只输出改写后的问题本身，不要解释、不要加引号、不要加前缀、不要换行。
+- 保留原问题里的型号、数字、单位、专有名词，一个字都不要改。
+- 把「它 / 这个 / 那款 / 上面 / 刚才 / 前者 / 后者」这类指代，换成历史里出现的具体对象。
+- 如果最新那句本身已经是完整独立的问题，原样输出即可。
+- 不要补充历史里没有的信息，不要推测答案，不要回答问题。`;
+
+/** 追问特征：短句、指代词、比较词。完整长问题无需改写，省一次模型调用。 */
+const FOLLOWUP_HINT = /它|它们|这款|那款|这个|那个|上面|刚才|前面|前者|后者|相比|对比|还有|另外|一样|再问|继续|呢\?|呢$|能不能|可以吗|支持吗|带不带|有没有/;
+
+export function needsRewrite(question, history) {
+  if (!Array.isArray(history) || !history.length) return false;
+  const t = String(question || '').trim();
+  return t.length <= 12 || FOLLOWUP_HINT.test(t);
+}
+
+/**
+ * 把「那它能给笔记本充吗」改写成「GC25 车载充电器能给笔记本充电吗」。
+ * 改写只用于检索，最终回答仍用员工原话 + 历史上下文，这样语气才自然。
+ * 任何失败都降级回原问题——追问绝不能因为改写失败而答不出来。
+ */
+export async function rewriteFollowup(cfg, question, history) {
+  const fallback = { query: question, rewritten: false, usage: null };
+  if (!needsRewrite(question, history)) return fallback;
+
+  const recent = history.slice(-6).map((h) => ({
+    role: h.role === 'user' ? 'user' : 'assistant',
+    content: String(h.content || '').slice(0, 320),
+  })).filter((h) => h.content);
+  if (!recent.length) return fallback;
+
+  const messages = [
+    { role: 'system', content: REWRITE_SYS },
+    ...recent,
+    { role: 'user', content: `最新追问：${question}` },
+  ];
+
+  try {
+    const r = await chat(cfg, messages, { maxTokens: 120, temperature: 0, timeout: 15000 });
+    let out = (r.content || '')
+      .trim()
+      .split('\n')[0]
+      .replace(/^["'「『]|["'」』]$/g, '')
+      .replace(/^(改写后|完整问题|问题|检索问题)\s*[:：]\s*/, '')
+      .trim();
+    if (!out || out.length < 2 || out.length > 160) return fallback;
+    return { query: out, rewritten: out !== question, usage: r.usage };
+  } catch {
+    return fallback;
+  }
+}
+
+/* ---------------- 结构化回答：表格资料要出表格，不要散文 ---------------- */
+
+const TABLE_EXT = /\.(xlsx|xls|csv)$/i;
+
+function isTableHit(h) {
+  const name = h?.chunk?.doc || '';
+  if (TABLE_EXT.test(name)) return true;
+  const text = h?.chunk?.text || '';
+  // OCR / Word 里的表格：有「工作表」表头且逗号密集
+  return /【工作表[：:]/.test(text) && (text.match(/,/g) || []).length >= 6;
+}
+
+const WANTS_TABLE = /列|列出|都有哪些|有哪些|分别是|分别|对比|比较|参数|规格|清单|表格|全部|各|多少种|几种|明细|一览表|单价|价格|报价|型号/;
+
+function structureBlock(hits, question) {
+  const tableHits = (hits || []).filter(isTableHit);
+  if (!tableHits.length) return '';
+
+  const strong = WANTS_TABLE.test(String(question || ''));
+  if (!strong) {
+    return `\n\n【表格资料命中】\n检索到的资料里有参数表 / 报价表。若回答涉及多个字段或多个型号，优先用 Markdown 表格（表头与数值照抄资料原文），表格前用一句话给结论；只涉及单个值时一句话回答即可，不要硬凑表格。`;
+  }
+
+  return `\n\n【表格资料命中 · 本轮必须遵守，且覆盖上面第 4 条】
+检索到的资料里含有表格 / 参数表，员工问的是多字段、多型号、参数或价格清单。本轮必须用 Markdown 表格回答：
+  1. 表头直接用资料里的原文字段名，不要自己改名或改写。
+  2. 一行一个对象 / 型号；数值、单位、型号逐字照抄资料，资料没写的格子填「—」，不要推测、不要补齐、不要换算。
+  3. 表格前最多一句结论；表格后不要再用段落把同样内容重复一遍。
+  4. 标准语法：首行 | 列 | 列 |，第二行必须 | --- | --- |，之后每行一条数据。
+  5. 如果资料里确实只有单个值，直接一句话回答，不要硬凑表格。
+  6. 表格是本轮主体，不受「2-4 句」限制。
+  7. 如果凑不齐至少两行有实际数据的记录，或表格里多数格子都要填「—」，不要输出空表格：
+     直接一句话说明资料里查到了什么、缺哪个字段，让管理员知道该补什么资料。`;
+}
+
+/** 前端渲染用的标记：这一轮是否命中了表格资料 */
+export function hasTableHits(hits) {
+  return (hits || []).some(isTableHit);
+}
+
+export function buildRagMessages(question, hits, assistant = {}, history = []) {
   const ctx = hits.length
     ? hits
         .map((h, i) => `[${i + 1}] ${h.chunk.doc}${h.chunk.page ? ` 第 ${h.chunk.page} 页` : ''}\n${h.chunk.text}`)
         .join('\n\n---\n\n')
     : '（没有检索到任何相关资料）';
 
-  return [
-    { role: 'system', content: SYSTEM + assistantBlock(assistant) },
-    { role: 'user', content: `【资料】\n${ctx}\n\n【问题】\n${question}` },
+  const messages = [
+    { role: 'system', content: SYSTEM + structureBlock(hits, question) + assistantBlock(assistant) },
   ];
+
+  /* 最近三轮对话原样带上，让「它」「那款」这类指代能被理解。
+   * 只放历史，不放资料——资料每轮都重新检索最新的，避免旧片段污染。 */
+  const recent = (Array.isArray(history) ? history : []).slice(-6)
+    .map((h) => ({
+      role: h.role === 'user' ? 'user' : 'assistant',
+      content: String(h.content || '').slice(0, h.role === 'user' ? 300 : 400),
+    }))
+    .filter((h) => h.content);
+  // 最后一条如果是 user，会和本轮问题连成两个 user，某些模型会报错
+  if (recent.length && recent[recent.length - 1].role === 'user') recent.pop();
+  messages.push(...recent);
+
+  messages.push({ role: 'user', content: `【资料】\n${ctx}\n\n【问题】\n${question}` });
+  return messages;
 }
 
 /**
@@ -204,12 +314,41 @@ export function assistantBlock(a) {
   return '\n\n【当前助手设定】\n' + L.join('\n');
 }
 
-/** 带检索的问答：返回回答 + 真实出处 */
-export async function answerWithRag(cfg, { question, hits, assistant }) {
-  const messages = buildRagMessages(question, hits, assistant);
+/**
+ * 输出护栏：模型偶尔会为了「必须出表格」硬凑一张全是「—」的空表。
+ * 提示词约束不住所有模型，这里在返回前把只有一行、且几乎没有有效数据的表格删掉，
+ * 保留模型后面写的那句「缺什么资料」，比一张空表有用得多。
+ */
+function stripEmptyTables(raw) {
+  const lines = String(raw || '').split('\n');
+  const out = [];
+  const isBlank = (c) => !c || /^(—|-|–|N\/A|n\/a|暂无|无|未写|资料未写|\/|未知)$/.test(c);
+  const cells = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+
+  for (let i = 0; i < lines.length; i++) {
+    const cur = lines[i].trim();
+    const nxt = (lines[i + 1] || '').trim();
+    if (cur.startsWith('|') && /^\|[\s:|\-]+$/.test(nxt) && nxt.includes('-')) {
+      let k = i + 2;
+      const rows = [];
+      while (k < lines.length && lines[k].trim().startsWith('|')) { rows.push(cells(lines[k])); k++; }
+      const filled = rows.flat().filter((c) => !isBlank(c)).length;
+      if (rows.length < 2 && filled < 3) { i = k - 1; continue; }  // 丢掉空表
+      for (let x = i; x < k; x++) out.push(lines[x]);
+      i = k - 1;
+      continue;
+    }
+    out.push(lines[i]);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** 带检索的问答：返回回答 + 真实出处。history 为空时与单轮行为完全一致。 */
+export async function answerWithRag(cfg, { question, hits, assistant, history }) {
+  const messages = buildRagMessages(question, hits, assistant, history);
   const r = await chat(cfg, messages);
 
-  const text = (r.content || '').trim();
+  const text = stripEmptyTables((r.content || '').trim());
   /* 模型明确说没有 = 资料缺口。
    * 以前还要求 hits.length === 0，等于"检索到片段但片段没用"这种情况不算缺口——
    * 可客户看到的就是"它答不上来"，那就该记进缺口清单。
