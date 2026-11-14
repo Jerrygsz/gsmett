@@ -22,6 +22,7 @@
     members: { title: '成员与权限', render: renderMembers },
     test: { title: '测试与验收', render: renderTest },
     portal: { title: '员工门户', render: renderPortal },
+    feedback: { title: '答案反馈', render: renderFeedback },
     logs: { title: '操作与运行记录', render: renderLogs },
     settings: { title: '设置', render: renderSettings },
   };
@@ -1505,7 +1506,9 @@
 
   function portalLink() {
     const id = (window.LIVE && window.LIVE.clientId) || '';
-    return id ? `${location.origin}/app.html?c=${id}#portal` : `${location.origin}/app.html#portal`;
+    /* 员工端是独立页面：不加载后台 JS，也不暴露后台入口。
+     * app.html#portal 只作为管理员的预览，不作为交付给员工的地址。 */
+    return id ? `${location.origin}/portal.html?c=${id}` : `${location.origin}/portal.html`;
   }
 
   /* 上线前的体检。服务端还会再校一遍，这里先让人看见差在哪，别点了才发现开不了 */
@@ -4529,6 +4532,31 @@
         </table>
       </div>
 
+      ${sectionHead('员工登录与可见资料', `${people.filter(p => p.hasPortalPwd && p.portal !== false).length} 个账号可登录`,
+        `<button class="btn btn--ghost btn--sm" id="btnCopyEmpLink">${icon('external')} 复制员工端链接</button>`)}
+      <div class="card mb20" style="overflow:hidden">
+        <div class="fs11 muted" style="padding:11px 14px;border-bottom:1px solid var(--border);line-height:1.7">
+          员工用账号密码登录 <code>${esc(portalLink().replace(location.origin, ''))}</code>。<b>没设密码就不能登录</b>；可见分类留空 = 可查全部资料，勾选后只查勾中的分类。过滤发生在检索层，受限片段不会发给模型。
+        </div>
+        <table class="table">
+          <thead><tr><th>成员</th><th style="width:190px">登录账号</th><th style="width:100px">登录</th><th>可见资料</th><th style="width:100px"></th></tr></thead>
+          <tbody>
+            ${people.map((p) => `
+              <tr>
+                <td><div class="fs12 b5">${esc(p.name)}</div><div class="fs11 muted">${esc(p.role)}</div></td>
+                <td class="fs11 mono">${esc(p.login || p.email || '（未设置）')}</td>
+                <td>${p.hasPortalPwd && p.portal !== false
+                  ? '<span class="badge badge--success badge--dot">已开通</span>'
+                  : '<span class="badge">未开通</span>'}</td>
+                <td class="fs11">${(p.cats || []).length
+                  ? (p.cats || []).map(c => `<span class="tag tag--outline" style="margin-right:4px">${esc(c)}</span>`).join('')
+                  : '<span class="muted">全部资料</span>'}</td>
+                <td><button class="btn btn--quiet btn--sm" data-emplogin="${esc(p.id)}">设置</button></td>
+              </tr>`).join('') || `<tr><td colspan="5" style="text-align:center;padding:24px" class="muted fs12">还没有成员</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
       ${sectionHead('角色能做什么', '按最小权限原则默认配置')}
       <div class="card" style="overflow:hidden">
         <table class="table">
@@ -4556,6 +4584,88 @@
     </div>`;
 
     qi('#btnInviteM').onclick = () => openInvite(null);
+
+    /* 员工端链接：只发 portal.html，不要把后台工作空间地址给员工 */
+    const copyEmp = qi('#btnCopyEmpLink');
+    if (copyEmp) copyEmp.onclick = async () => {
+      const link = portalLink();
+      try {
+        await navigator.clipboard.writeText(link);
+        toast('员工端链接已复制');
+      } catch {
+        modal({
+          title: '员工端链接',
+          desc: '复制下面这个地址发给员工',
+          body: `<code style="display:block;padding:10px;background:var(--surface-2);border-radius:7px;word-break:break-all;font-size:12px">${esc(link)}</code>`,
+          okText: '知道了',
+        });
+      }
+    };
+
+    qa('[data-emplogin]').forEach(b => b.onclick = async () => {
+      const m = people.find(x => x.id === b.dataset.emplogin);
+      if (!m) return;
+      let cats = [];
+      if (window.LIVE && window.LIVE.on) {
+        try { cats = (await window.API.members(window.LIVE.clientId)).cats || []; } catch { /* 下面兜底 */ }
+      }
+      if (!cats.length) cats = [...new Set((S.project.files || []).map(f => f.cat).filter(Boolean))];
+      const cur = m.cats || [];
+      const enabled = !!(m.hasPortalPwd && m.portal !== false);
+      modal({
+        title: `${m.name} · 员工端登录`,
+        desc: '密码只存哈希，改过之后员工需要重新登录。',
+        wide: true,
+        okText: '保存',
+        body: `<div class="stack" style="gap:14px">
+          <div class="grid g2" style="gap:12px">
+            <div class="field" style="margin:0"><label class="field__label">登录账号</label>
+              <input class="input" id="empLogin" value="${esc(m.login || m.email || '')}" placeholder="通常用企业邮箱"></div>
+            <div class="field" style="margin:0"><label class="field__label">新密码（留空 = 不修改）</label>
+              <input class="input" id="empPwd" type="password" autocomplete="new-password" placeholder="至少 6 位"></div>
+          </div>
+          <div class="row" style="gap:18px;flex-wrap:wrap">
+            <label class="fs12 row" style="gap:6px"><input type="checkbox" id="empPortal" ${enabled ? 'checked' : ''}> 允许登录员工端</label>
+            <label class="fs12 row" style="gap:6px"><input type="checkbox" id="empClearPwd"> 清除密码（停用登录）</label>
+          </div>
+          <div>
+            <div class="field__label mb8">可见资料分类</div>
+            <label class="fs12 row mb8" style="gap:6px"><input type="checkbox" id="empAll" ${cur.length ? '' : 'checked'}> 全部资料</label>
+            <div class="row" style="gap:8px;flex-wrap:wrap" id="empCats">
+              ${cats.map(c => `<label class="fs12 row" style="gap:5px;border:1px solid var(--border);border-radius:7px;padding:5px 9px;cursor:pointer">
+                <input type="checkbox" data-cat="${esc(c)}" ${cur.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('') || '<span class="fs11 muted">还没有资料分类</span>'}
+            </div>
+            <div class="fs11 muted mt8">留空 = 查全部资料；勾选后，其它分类的片段在检索时就被剔除，不会进入模型上下文。</div>
+          </div>
+          <div class="note note--warn">${icon('shield')}<span class="fs11">员工端是独立页面，看不到后台配置、原始文件与其它客户的资料。管理员预览里打的分数不计入满意度统计。</span></div>
+        </div>`,
+        onOk: async (back) => {
+          const pwd = back.querySelector('#empPwd').value.trim();
+          const clear = back.querySelector('#empClearPwd').checked;
+          const portal = back.querySelector('#empPortal').checked;
+          const all = back.querySelector('#empAll').checked;
+          const chosen = all ? [] : Array.from(back.querySelectorAll('[data-cat]:checked')).map(x => x.dataset.cat);
+          if (pwd && pwd.length < 6) { toast('密码至少 6 位', 'warn'); return false; }
+          if (portal && !clear && !pwd && !m.hasPortalPwd) {
+            toast('还没设置密码，员工无法登录。先填一个新密码。', 'warn');
+            return false;
+          }
+          if (!(window.LIVE && window.LIVE.on)) { toast('需要连上本地服务才能设置员工登录', 'warn'); return false; }
+          const patch = {
+            login: back.querySelector('#empLogin').value.trim(),
+            portal: clear ? false : portal,
+            cats: clear ? [] : chosen,
+          };
+          if (clear) patch.pwd = '';
+          else if (pwd) patch.pwd = pwd;
+          try {
+            await window.LIVE.editMember(m.id, patch);
+            toast('员工登录设置已保存');
+            router();
+          } catch (e) { toast('保存失败：' + e.message, 'warn'); return false; }
+        },
+      });
+    });
 
     qa('[data-mem]').forEach(b => b.onclick = () => {
       const m = people.find(x => x.id === b.dataset.mem);
@@ -4607,6 +4717,102 @@
         },
       });
     });
+  }
+
+  /* =====================================================================
+     5.5 答案反馈（员工给每条回答打的 👍 / 👎）
+     ===================================================================== */
+  let fbFilter = 'all';
+
+  function renderFeedback(root) {
+    const liveOn = !!(window.LIVE && window.LIVE.on);
+    root.innerHTML = `<div class="page page--narrow">
+      ${pageHead('答案反馈', '员工对每条回答的评价。差评可以直接转成补资料任务，让知识库越用越准。',
+        `<a class="btn btn--ghost btn--sm" href="${esc(portalLink())}" target="_blank" rel="noopener">${icon('external')} 打开员工端</a>`)}
+      <div id="fbWrap"><div class="card card--pad"><div class="fs12 muted">正在读取真实评价…</div></div></div>
+    </div>`;
+    const wrap = qi('#fbWrap');
+    if (!liveOn) {
+      wrap.innerHTML = `<div class="card card--pad"><div class="empty">${icon('info')}<p>需要连上本地服务才能读取员工评价。</p></div></div>`;
+      return;
+    }
+
+    window.LIVE.answerFeedback().then((r) => {
+      if (!root.isConnected || wrap.isConnected === false) return;
+      paint(r);
+    }).catch((e) => {
+      wrap.innerHTML = `<div class="card card--pad fs12" style="color:var(--danger)">读取失败：${esc(e.message)}</div>`;
+    });
+
+    function paint(r) {
+      const items = r.items || [];
+      const st = r.stats || {};
+      const real = items.filter((x) => x.source !== 'preview');
+      const pending = real.filter((x) => x.vote === 'down' && !x.gapId).length;
+      const shown = items.filter((x) => fbFilter === 'all' || x.vote === fbFilter);
+
+      wrap.innerHTML = `
+        <div class="grid g4 mb20">
+          ${[
+            ['回答满意度', st.rate == null ? '—' : st.rate + '%', st.rated ? `${st.rated} 次员工评价` : '还没有员工评价'],
+            ['有用', String(st.up || 0), '员工点了 👍'],
+            ['没帮上', String(st.down || 0), '员工点了 👎'],
+            ['待处理差评', String(pending), '还没转成补资料任务'],
+          ].map(([k, v, s]) => `<div class="card card--pad">
+            <div class="fs11 muted">${k}</div><div class="fs17 b6 tnum mt4">${esc(v)}</div>
+            <div class="fs11 muted mt4">${esc(s)}</div></div>`).join('')}
+        </div>
+
+        ${st.preview ? `<div class="note mb16">${icon('info')}<span class="fs11">另有 ${st.preview} 条来自管理员预览的打分，不计入满意度，避免自己点几下就把报表做好看。</span></div>` : ''}
+
+        ${sectionHead('评价明细', `${shown.length} 条`, `
+          <div class="row" style="gap:5px">
+            ${[['all', '全部'], ['down', '没帮上'], ['up', '有用']].map(([k, n]) => `
+              <button class="btn btn--sm ${fbFilter === k ? 'btn--primary' : 'btn--ghost'}" data-fb-filter="${k}">${n}</button>`).join('')}
+          </div>`)}
+
+        <div class="card" style="overflow:hidden">
+          ${shown.length ? shown.map((x) => `
+            <div class="fb-row">
+              <div class="fb-row__top">
+                <span class="badge ${x.vote === 'down' ? 'badge--warn' : 'badge--success'}">
+                  ${icon(x.vote === 'down' ? 'thumbsDown' : 'thumbsUp')} ${x.vote === 'down' ? '没帮上' : '有用'}
+                </span>
+                ${x.source === 'preview' ? '<span class="tag tag--outline">管理员预览</span>' : ''}
+                <span class="fs11 muted" style="margin-left:auto">${esc(x.who || '')} · ${esc(String(x.at || '').slice(0, 16).replace('T', ' '))}</span>
+              </div>
+              <div class="fs12 b5 mt10">${esc(x.q || '（没有记录问题）')}</div>
+              ${x.reason ? `<div class="fs11 mt6" style="color:var(--warn)">员工补充：${esc(x.reason)}</div>` : ''}
+              ${x.answer ? `<div class="fs11 muted mt6 fb-row__ans">${esc(x.answer)}</div>` : ''}
+              ${(x.citations || []).length ? `<div class="fs11 muted mt6">出处：${esc(x.citations.join('、'))}</div>` : ''}
+              <div class="fb-row__acts">
+                ${x.vote === 'down' ? (x.gapId
+                  ? `<span class="fs11" style="color:var(--success)">${icon('checkCircle')} 已转成补资料任务</span>`
+                  : `<button class="btn btn--ghost btn--sm" data-fb-gap="${esc(x.id)}">${icon('alert')} 转成补资料任务</button>`) : ''}
+                <a class="btn btn--quiet btn--sm" href="#wizard/8">看缺口清单 ${icon('chevronRight')}</a>
+              </div>
+            </div>`).join('')
+            : `<div class="empty">${icon('info')}<p>还没有评价。员工在 ${esc(portalLink().replace(location.origin, ''))} 里对回答点 👍/👎 后，会出现在这里。</p></div>`}
+        </div>`;
+
+      qa('[data-fb-filter]', wrap).forEach((b) => b.onclick = () => {
+        fbFilter = b.dataset.fbFilter;
+        paint(r);
+      });
+      qa('[data-fb-gap]', wrap).forEach((b) => b.onclick = async () => {
+        b.disabled = true;
+        try {
+          const res = await window.LIVE.feedbackToGap(b.dataset.fbGap);
+          if (res.error) throw new Error(res.error);
+          toast('已转成补资料任务，可在配置中心指派');
+          const fresh = await window.LIVE.answerFeedback();
+          paint(fresh);
+        } catch (e) {
+          b.disabled = false;
+          toast('操作失败：' + e.message, 'warn');
+        }
+      });
+    }
   }
 
   /* =====================================================================
@@ -4880,6 +5086,21 @@
     return blocks.join('');
   }
 
+  /** 预览界面也能试 👍/👎，服务端会把这类打分标成 preview 并排除在满意度之外 */
+  function portalFbHtml(t) {
+    if (!t.aid) return '';
+    return `<div class="ans-fb ${t.vote ? 'is-voted' : ''}" data-aid="${esc(t.aid)}">
+      <span class="ans-fb__label">这个回答帮到你了吗？</span>
+      <button type="button" class="ans-fb__btn ${t.vote === 'up' ? 'is-active' : ''}" data-vote="up">${icon('thumbsUp')} 有用</button>
+      <button type="button" class="ans-fb__btn ${t.vote === 'down' ? 'is-active' : ''}" data-vote="down">${icon('thumbsDown')} 没帮上</button>
+      <span class="ans-fb__hint">${t.vote ? '已记录（预览打分不计入统计）' : ''}</span>
+    </div>
+    <div class="ans-fb__reason" data-reason-for="${esc(t.aid)}" ${t.vote === 'down' && !t.reasonSent ? '' : 'hidden'}>
+      <input class="input" placeholder="哪里不对？（选填）" maxlength="120">
+      <button type="button" class="btn btn--ghost btn--sm" data-send-reason="${esc(t.aid)}">提交</button>
+    </div>`;
+  }
+
   /** 一轮问答渲染成两条气泡；重绘页面时用它回放整段会话 */
   function turnHtml(t, who, includeUser = true) {
     const cites = t.cite && t.cite.length
@@ -4888,7 +5109,7 @@
     const userMsg = includeUser
       ? `<div class="msg msg--user"><span class="msg__av">${esc(who)}</span><div class="msg__bubble">${esc(t.q)}</div></div>`
       : '';
-    return `${userMsg}<div class="msg"><span class="msg__av">智</span><div class="msg__bubble">${t.a || ''}${t.rewritten ? `<div class="msg__rewrite">接着上一轮理解为：${esc(t.rewritten)}</div>` : ''}${cites}</div></div>`;
+    return `${userMsg}<div class="msg"><span class="msg__av">智</span><div class="msg__bubble">${t.a || ''}${t.rewritten ? `<div class="msg__rewrite">接着上一轮理解为：${esc(t.rewritten)}</div>` : ''}${cites}${portalFbHtml(t)}</div></div>`;
   }
 
   /** 发给服务端的对话上下文：只要最近三轮，回答截断，别把整段历史塞进 token */
@@ -5050,6 +5271,46 @@
     // 页面重绘后回放历史会话，视野停在最新一条
     if (portalTurns.length) body.scrollTop = body.scrollHeight;
 
+    /* 预览里也能试 👍/👎。预览请求不带员工令牌，服务端标成 preview 不计入满意度。 */
+    if (window.LIVE && window.LIVE.on) {
+      body.addEventListener('click', async (e) => {
+        const voteBtn = e.target.closest('.ans-fb__btn');
+        const reasonBtn = e.target.closest('[data-send-reason]');
+        if (!voteBtn && !reasonBtn) return;
+        const aid = voteBtn ? voteBtn.closest('.ans-fb').dataset.aid : reasonBtn.dataset.sendReason;
+        const t = portalTurns.find((x) => x.aid === aid);
+        if (!t) return;
+        let vote, reason = '';
+        if (reasonBtn) {
+          vote = 'down';
+          const rb = qi(`[data-reason-for="${aid}"]`);
+          reason = rb ? rb.querySelector('input').value.trim() : '';
+        } else {
+          vote = voteBtn.dataset.vote;
+          if (t.vote === vote) vote = null;          // 再点一次 = 撤销
+          else if (vote === 'down') {
+            const rb = qi(`[data-reason-for="${aid}"]`);
+            if (rb && rb.hidden) { rb.hidden = false; rb.querySelector('input').focus(); return; }
+          }
+        }
+        try {
+          const r = await window.LIVE.setAnswerFeedback({
+            answerId: aid, vote, reason,
+            question: t.q, answer: (t.plain || '').slice(0, 600),
+            citations: (t.cite || []).slice(0, 6).map((c) => ({ doc: c })),
+            assistant: t.assistant || '',
+          });
+          if (r.error) throw new Error(r.error);
+          t.vote = vote;
+          t.reasonSent = !!reason;
+          qa('#chatBody > .msg:not(:first-child)').forEach((n) => n.remove());
+          portalTurns.forEach((x) => body.insertAdjacentHTML('beforeend', turnHtml(x, who, true)));
+          body.scrollTop = body.scrollHeight;
+          toast(vote ? '已记录（预览打分不计入统计）' : '已撤销评价');
+        } catch (err) { toast('提交失败：' + err.message, 'warn'); }
+      });
+    }
+
     function pushUser(text) {
       body.insertAdjacentHTML('beforeend', `<div class="msg msg--user"><span class="msg__av">${esc(who)}</span><div class="msg__bubble">${esc(text)}</div></div>`);
       body.scrollTop = body.scrollHeight;
@@ -5100,6 +5361,7 @@
             turn.plain = res.answer || '';
             turn.cite = (res.citations || []).map(c => `${c.doc}${c.page ? ' · P.' + c.page : ''}`);
             turn.gap = !!res.gap;
+            turn.aid = res.answerId || '';
           }
           turn.rewritten = res.rewritten || '';
 

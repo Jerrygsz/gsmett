@@ -71,6 +71,8 @@ const TM = (() => {
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
     filter: '<path d="M22 3H2l8 9.5V19l4 2v-8.5z"/>',
     git: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M18 14.5a6.5 6.5 0 0 1-6.5 3.2"/>',
+    thumbsUp: '<path d="M7 10v11H3V10z"/><path d="M7 10l4-7a2 2 0 0 1 3 1.7V9h4.3a2 2 0 0 1 2 2.4l-1.4 7A2 2 0 0 1 17 20H7"/>',
+    thumbsDown: '<path d="M7 14V3H3v11z"/><path d="m7 14-4 7a2 2 0 0 0 3 1.7V15h4.3a2 2 0 0 0 2-2.4l1.4-7A2 2 0 0 0 11 4H7"/>',
   };
 
   function icon(name, cls) {

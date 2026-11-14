@@ -16,3 +16,6 @@ tickets.json
 
 # 本地排查用的临时脚本与截图，不进仓库
 tools/tmp/
+
+# 员工门户会话签名密钥（在 data/ 下，双保险）
+.portal-secret

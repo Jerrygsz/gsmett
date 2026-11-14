@@ -19,6 +19,7 @@ import { parseFile, isSupported, extOf, SUPPORTED } from './parser.js';
 import { chunkDoc, buildIndex, search } from './kb.js';
 import * as LLM from './llm.js';
 import { renderPdfImages, ocrImages, explainNoVision } from './ocr.js';
+import { hashPwd, verifyPwd, signToken, verifyToken } from './portal-auth.js';
 import {
   ROOT, initStorage, listClients, getClient, saveClient, nextProjectNo, deleteClient,
   getState, saveState, patchState, getDocs, saveDocs, getIndex, saveIndex,
@@ -211,6 +212,100 @@ function guessCat(name) {
 }
 
 const docCat = (d) => d.cat || guessCat(d.name);
+
+/* ---------------- 员工门户：身份 / 会话 / 可见范围 ----------------
+ * 员工账号复用 members[]，不另起一套人。管理员在「成员与权限」里给成员
+ * 设登录密码和可见资料分类。没设密码 = 不能登录，不是弱密码默认值。
+ *
+ * 明文 API Key 和密码哈希都绝不下发：以前 GET /state 直接把整个 state
+ * 丢给浏览器，cfg.llm.apiKey 是解过封的明文，和 README 的承诺对不上。 */
+function publicMember(m) {
+  const { pwdHash, ...rest } = m || {};
+  return { ...rest, hasPortalPwd: !!pwdHash };
+}
+function publicState(st) {
+  const out = JSON.parse(JSON.stringify(st || {}));
+  if (out.cfg?.llm?.apiKey) out.cfg.llm.apiKey = maskKey(out.cfg.llm.apiKey);
+  out.members = (out.members || []).map(publicMember);
+  return out;
+}
+function allCats(id) {
+  return [...new Set(getDocs(id).map(docCat))].sort();
+}
+function portalAccount(m) {
+  return String(m?.login || m?.email || '').trim().toLowerCase();
+}
+function isLive(st) { return !!(st?.project?.live?.on); }
+function viewerCats(m) {
+  return Array.isArray(m?.cats) ? m.cats.filter(Boolean) : [];
+}
+/** 令牌无状态：验签 + 账号仍然可用 + 密码没被改过，三条都过才算登录 */
+function portalViewer(id, token) {
+  const p = verifyToken(token);
+  if (!p || p.cid !== id) return null;
+  const st = ensureState(id);
+  const m = (st.members || []).find((x) => x.id === p.mid);
+  if (!m || m.status === 'limited' || m.portal === false || !m.pwdHash) return null;
+  if ((p.pwdAt || '') !== (m.pwdAt || '')) return null;
+  return m;
+}
+function bearer(req, body) {
+  const h = String(req.headers.authorization || '');
+  return h.startsWith('Bearer ') ? h.slice(7).trim() : String(body?.portalToken || '').trim();
+}
+/* 必须放在 route 外面：每次请求新建 Map 就等于没限流 */
+const LOGIN_FAILS = new Map();   // 同一账号连错 5 次，冷却 60 秒
+
+/* ---------------- 答案反馈 ----------------
+ * 预览界面的打分不算进满意度，否则管理员自己点几下就能把报表做好看。 */
+function visibleDocCount(id, cats) {
+  const docs = getDocs(id);
+  return cats.length ? docs.filter((d) => cats.includes(docCat(d))).length : docs.length;
+}
+/** 登录后才给的快捷问题：从「这份资料能回答什么」里取，且只取该员工可见分类 */
+function portalPrompts(id, cats) {
+  const out = [];
+  const seen = new Set();
+  for (const d of getDocs(id)) {
+    const cat = docCat(d);
+    if (cats.length && !cats.includes(cat)) continue;
+    const q = (Array.isArray(d.qa) ? d.qa : [])[0];
+    if (!q || out.includes(q) || seen.has(cat)) continue;
+    out.push(q);
+    seen.add(cat);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+function feedbackStats(list) {
+  const active = (list || []).filter((x) => x.vote === 'up' || x.vote === 'down');
+  const real = active.filter((x) => x.source !== 'preview');
+  const up = real.filter((x) => x.vote === 'up').length;
+  const down = real.length - up;
+  const byDay = {};
+  const reasons = {};
+  for (const x of real) {
+    byDay[x.atDay] = (byDay[x.atDay] || 0) + 1;
+    if (x.vote === 'down' && x.reason) reasons[x.reason] = (reasons[x.reason] || 0) + 1;
+  }
+  return {
+    total: (list || []).length,
+    rated: real.length,
+    up, down,
+    rate: real.length ? Math.round((up / real.length) * 100) : null,
+    preview: active.length - real.length,
+    byDay,
+    reasonTop: Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      .map(([reason, n]) => ({ reason, n })),
+  };
+}
+/** 检索层过滤：受限片段连模型都看不到，不是答完再遮 */
+function filterByCats(hits, cats, docs) {
+  if (!cats.length) return hits;
+  const byId = Object.fromEntries(docs.map((d) => [d.id, docCat(d)]));
+  const byName = Object.fromEntries(docs.map((d) => [d.name, docCat(d)]));
+  return hits.filter((h) => cats.includes(byId[h.chunk.docId] || byName[h.chunk.doc] || ''));
+}
 
 /* ---------------- AI 资料分类 ----------------
  * 只看文件名的规则，会把报价单、PI、订单全塞进「产品资料」。
@@ -1315,14 +1410,111 @@ async function route(req, res, url) {
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/state$/)) && method === 'GET') {
     requireClient(m[1]);
-    return sendJSON(res, 200, { state: ensureState(m[1]) });
+    return sendJSON(res, 200, { state: publicState(ensureState(m[1])) });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/state$/)) && (method === 'PATCH' || method === 'POST')) {
     requireClient(m[1]);
     const patch = await readJSONBody(req);
+    // 前端不能借这个接口改员工登录设置，统一走 /members/:id
+    delete patch.members;
+    delete patch.answerFeedback;
+    delete patch.portalGaps;
     const st = patchState(m[1], patch);
-    return sendJSON(res, 200, { state: st });
+    return sendJSON(res, 200, { state: publicState(st) });
+  }
+
+  /* --- 员工门户：登录态 ---
+   * 员工端是独立的 portal.html，不加载后台那套 JS，后台页面不对员工开放。
+   * 没按下「开启使用」时，服务端直接拒绝登录，光改前端拦不住。 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/portal\/meta$/)) && method === 'GET') {
+    const id = m[1];
+    requireClient(id);
+    const st = ensureState(id);
+    const c = getClient(id);
+    return sendJSON(res, 200, {
+      org: { name: c?.name || st.org?.name || '企业', short: st.org?.short || '' },
+      live: isLive(st),
+      cats: allCats(id),
+      assistants: (st.assistants || []).filter((a) => a.enabled !== false)
+        .map((a) => ({ id: a.id, name: a.name, scope: a.scope || [] })),
+      docCount: getDocs(id).length,
+      accountCount: (st.members || []).filter((x) => x.pwdHash && x.portal !== false && x.status !== 'limited').length,
+    });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/portal\/login$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const st = ensureState(id);
+    if (!isLive(st)) {
+      return sendJSON(res, 409, { error: '员工门户还没开放，请联系管理员开启使用', code: 'LOCKED' });
+    }
+    const account = String(b.account || '').trim().toLowerCase();
+    const key = `${id}:${account}`;
+    const fail = LOGIN_FAILS.get(key);
+    if (fail && fail.n >= 5 && Date.now() - fail.at < 60000) {
+      return sendJSON(res, 429, { error: '尝试次数太多，请一分钟后再试' });
+    }
+    const member = (st.members || []).find((x) => portalAccount(x) === account);
+    const ok = member && member.pwdHash && member.portal !== false && member.status !== 'limited'
+      && verifyPwd(String(b.pwd || ''), member.pwdHash);
+    if (!ok) {
+      LOGIN_FAILS.set(key, { n: (fail?.n || 0) + 1, at: Date.now() });
+      return sendJSON(res, 401, { error: '账号或密码不对' });
+    }
+    LOGIN_FAILS.delete(key);
+    member.lastLoginAt = new Date().toISOString();
+    saveState(id, st);
+    const token = signToken({ cid: id, mid: member.id, pwdAt: member.pwdAt || '' });
+    const cats = viewerCats(member);
+    return sendJSON(res, 200, {
+      token,
+      member: { id: member.id, name: member.name, role: member.role, cats, allDocs: !cats.length },
+      org: { name: st.org?.short || st.org?.name || '企业' },
+      prompts: portalPrompts(id, cats),
+      docCount: visibleDocCount(id, cats),
+      assistants: (st.assistants || []).filter((a) => a.enabled !== false)
+        .map((a) => ({ id: a.id, name: a.name, scope: a.scope || [] })),
+    });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/portal\/me$/)) && method === 'GET') {
+    const id = m[1];
+    requireClient(id);
+    const token = bearer(req, {});
+    const viewer = token ? portalViewer(id, token) : null;
+    if (!viewer) return sendJSON(res, 401, { error: '登录已失效，请重新登录', code: 'AUTH' });
+    const st = ensureState(id);
+    if (!isLive(st)) return sendJSON(res, 409, { error: '员工门户已暂停使用', code: 'LOCKED' });
+    const cats = viewerCats(viewer);
+    return sendJSON(res, 200, {
+      member: { id: viewer.id, name: viewer.name, role: viewer.role, cats, allDocs: !cats.length },
+      org: { name: st.org?.short || st.org?.name || '企业' },
+      prompts: portalPrompts(id, cats),
+      docCount: visibleDocCount(id, cats),
+      assistants: (st.assistants || []).filter((a) => a.enabled !== false)
+        .map((a) => ({ id: a.id, name: a.name, scope: a.scope || [] })),
+    });
+  }
+
+  /* 员工端右侧只读摘要：只给该看的几个数字，不把整个 state 丢出去 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/portal\/summary$/)) && method === 'GET') {
+    const id = m[1];
+    requireClient(id);
+    const viewer = portalViewer(id, bearer(req, {}));
+    if (!viewer) return sendJSON(res, 401, { error: '登录已失效，请重新登录', code: 'AUTH' });
+    const st = ensureState(id);
+    const gaps = ensureGaps(st);
+    const g = gapStats(gaps);
+    return sendJSON(res, 200, {
+      asks: st.portalAsks || 0,
+      miss: st.portalMiss || 0,
+      gaps: { open: g.open + g.assigned, resolved: g.resolved, rate: g.rate },
+      recentResolved: gaps.filter((x) => x.status === 'resolved').slice(0, 3).map((x) => x.q),
+      feedback: feedbackStats(st.answerFeedback || []),
+    });
   }
 
   /* --- 开启/暂停使用：交付完成后由客户自己按下的开关 ---
@@ -1361,7 +1553,10 @@ async function route(req, res, url) {
   /* --- 客户成员：后台和客户端共用同一份，改完立刻落盘 --- */
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/members$/)) && method === 'GET') {
     requireClient(m[1]);
-    return sendJSON(res, 200, { members: listMembers(m[1]) });
+    return sendJSON(res, 200, {
+      members: listMembers(m[1]).map(publicMember),
+      cats: allCats(m[1]),
+    });
   }
 
   if ((m = p.match(/^\/api\/clients\/([\w]+)\/members$/)) && method === 'POST') {
@@ -1406,8 +1601,31 @@ async function route(req, res, url) {
     if (patch.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patch.email)) {
       return sendJSON(res, 400, { error: '邮箱格式不对，或者留空' });
     }
+    /* 员工登录设置：密码只存哈希，改密码会让已发出的令牌全部失效 */
+    if (b.pwd !== undefined) {
+      const pw = String(b.pwd);
+      if (pw === '') {
+        patch.pwdHash = '';
+        patch.pwdAt = '';
+        patch.portal = false;
+      } else if (pw.length < 6) {
+        return sendJSON(res, 400, { error: '登录密码至少 6 位' });
+      } else {
+        patch.pwdHash = hashPwd(pw);
+        patch.pwdAt = new Date().toISOString();
+      }
+    }
+    if (b.portal !== undefined) patch.portal = !!b.portal;
+    if (b.login !== undefined) patch.login = String(b.login).trim().slice(0, 60);
+    if (Array.isArray(b.cats)) {
+      const allowed = allCats(id);
+      patch.cats = b.cats.map(String).filter((c) => allowed.includes(c)).slice(0, 20);
+    }
+    if (patch.login && listMembers(id).some((x) => x.id !== m[2] && portalAccount(x) === patch.login.toLowerCase())) {
+      return sendJSON(res, 400, { error: '这个登录账号已被其他成员占用' });
+    }
     const member = updateMember(id, m[2], patch);
-    return sendJSON(res, member ? 200 : 404, member ? { member } : { error: '成员不存在' });
+    return sendJSON(res, member ? 200 : 404, member ? { member: publicMember(member) } : { error: '成员不存在' });
   }
 
   /* --- 资料 --- */
@@ -2179,6 +2397,19 @@ async function route(req, res, url) {
     if (!q) return sendJSON(res, 400, { error: '问题不能为空' });
 
     const st = ensureState(id);
+    /* 带令牌 = 员工端。服务端自己验，不信任前端说自己是谁。
+     * 没带令牌的是后台预览 / 内部验证（管理员口径，查全部资料）。 */
+    const token = bearer(req, b);
+    let viewer = null;
+    if (token) {
+      viewer = portalViewer(id, token);
+      if (!viewer) return sendJSON(res, 401, { error: '登录已失效，请重新登录', code: 'AUTH' });
+      if (!isLive(st)) return sendJSON(res, 409, { error: '员工门户已暂停使用', code: 'LOCKED' });
+    }
+    const vCats = viewerCats(viewer);
+    const docsForScope = getDocs(id);
+    const answerId = 'a_' + crypto.randomBytes(6).toString('hex');
+
     const idx = getIndex(id);
     if (!idx) return sendJSON(res, 400, { error: '知识库尚未构建' });
 
@@ -2201,9 +2432,13 @@ async function route(req, res, url) {
     const searchQ = rw.query || q;
     if (rw.usage) addUsage(st, rw.usage);
 
-    // 限定了范围就多取一些候选，过滤完再截断，避免过滤后不够用
-    let hits = search(idx.index, idx.chunks, searchQ, asst?.scope?.length ? topK * 4 : topK);
-    if (asst?.scope?.length) hits = filterByScope(hits, asst, getDocs(id)).slice(0, topK);
+    /* 检索层就把不该看的切片剔掉——这些片段不会进提示词、不会进引用、更不会到模型那边。
+     * 助手范围与员工可见分类取交集；有限制时多取候选，过滤完再截断。 */
+    const restricted = !!(asst?.scope?.length || vCats.length);
+    let hits = search(idx.index, idx.chunks, searchQ, restricted ? topK * 6 : topK);
+    if (asst?.scope?.length) hits = filterByScope(hits, asst, docsForScope);
+    if (vCats.length) hits = filterByCats(hits, vCats, docsForScope);
+    hits = hits.slice(0, topK);
 
     // 没检索到就直接告知，不浪费模型调用
     if (!hits.length) {
@@ -2211,14 +2446,17 @@ async function route(req, res, url) {
       st.portalMiss = (st.portalMiss || 0) + 1;
       recordGap(st, searchQ, asst);
       saveState(id, st);
-      const scoped = asst?.scope?.length
-        ? `「${asst.name}」只查 ${asst.scope.join('、')} 这几类资料，这个问题可能落在它的范围外。`
-        : '这个问题涉及的资料还没有上传，或者换一种说法再试试。';
+      const scoped = vCats.length
+        ? `你当前只能查 ${vCats.join('、')} 这几类资料，这个问题可能落在权限范围外。`
+        : asst?.scope?.length
+          ? `「${asst.name}」只查 ${asst.scope.join('、')} 这几类资料，这个问题可能落在它的范围外。`
+          : '这个问题涉及的资料还没有上传，或者换一种说法再试试。';
       return sendJSON(res, 200, {
         answer: `知识库里没有找到相关内容。${scoped}`,
         citations: [],
         gap: true,
         hits: 0,
+        answerId,
         rewritten: rw.rewritten ? rw.query : null,
         assistant: asst ? { id: asst.id, name: asst.name } : null,
         gaps: ensureGaps(st),
@@ -2238,6 +2476,7 @@ async function route(req, res, url) {
         })),
         message: '知识库里找到了相关内容，但还没有配置模型，无法生成自然语言回答。到第 5 步填入 API Key 即可。',
         rewritten: rw.rewritten ? rw.query : null,
+        answerId,
         stats: { asks: st.portalAsks, miss: st.portalMiss },
       });
     }
@@ -2266,6 +2505,8 @@ async function route(req, res, url) {
         model: r.model,
         rewritten: rw.rewritten ? rw.query : null,
         tableMode: LLM.hasTableHits(hits),
+        answerId,
+        viewer: viewer ? { name: viewer.name, cats: vCats, allDocs: !vCats.length } : null,
         assistant: asst ? { id: asst.id, name: asst.name, scope: asst.scope } : null,
         resolved: resolved ? { id: resolved.id, q: resolved.q } : null,
         gaps,
@@ -2347,6 +2588,73 @@ async function route(req, res, url) {
     }
     saveState(id, st);
     return sendJSON(res, 200, { gap: g, gaps, stats: gapStats(gaps) });
+  }
+
+  /* --- 每条回答的 👍 / 👎 ---
+   * 用服务端下发的 answerId 做主键，同一条回答改判/撤销都是 upsert，
+   * 不会出现「一个人点五次、满意度翻倍」。 */
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/answer-feedback$/)) && method === 'GET') {
+    const id = m[1];
+    requireClient(id);
+    const list = ensureState(id).answerFeedback || [];
+    return sendJSON(res, 200, { items: list.slice(0, 200), stats: feedbackStats(list) });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/answer-feedback$/)) && method === 'POST') {
+    const id = m[1];
+    requireClient(id);
+    const b = await readJSONBody(req);
+    const aid = String(b.answerId || '').trim();
+    if (!/^a_[\w]{6,20}$/.test(aid)) return sendJSON(res, 400, { error: '回答标识不对' });
+    const vote = b.vote === null || b.vote === '' ? null : String(b.vote);
+    if (vote && !['up', 'down'].includes(vote)) return sendJSON(res, 400, { error: '评价只能是 up / down' });
+
+    const st = ensureState(id);
+    st.answerFeedback = Array.isArray(st.answerFeedback) ? st.answerFeedback : [];
+    const list = st.answerFeedback;
+    const i = list.findIndex((x) => x.id === aid);
+    if (!vote) {
+      if (i >= 0) list.splice(i, 1);           // 撤销 = 删掉这条评价
+    } else {
+      const token = bearer(req, b);
+      const viewer = token ? portalViewer(id, token) : null;
+      const item = {
+        id: aid,
+        vote,
+        reason: String(b.reason || '').trim().slice(0, 120),
+        q: String(b.question || '').trim().slice(0, 200),
+        answer: String(b.answer || '').trim().slice(0, 600),
+        citations: (Array.isArray(b.citations) ? b.citations : []).slice(0, 6)
+          .map((c) => String(c?.doc || c || '').slice(0, 120)),
+        who: viewer ? viewer.name : '管理员预览',
+        by: viewer ? viewer.id : 'preview',
+        source: viewer ? 'portal' : 'preview',
+        assistant: String(b.assistant || '').slice(0, 40),
+        at: new Date().toISOString(),
+        atDay: new Date().toISOString().slice(0, 10),
+        gapId: i >= 0 ? (list[i].gapId || '') : '',
+      };
+      if (i >= 0) list[i] = item; else list.unshift(item);
+      if (list.length > 300) list.length = 300;
+    }
+    saveState(id, st);
+    return sendJSON(res, 200, { ok: true, stats: feedbackStats(list) });
+  }
+
+  if ((m = p.match(/^\/api\/clients\/([\w]+)\/answer-feedback\/([\w]+)\/to-gap$/)) && method === 'POST') {
+    const id = m[1], aid = m[2];
+    requireClient(id);
+    const st = ensureState(id);
+    const list = st.answerFeedback || [];
+    const item = list.find((x) => x.id === aid);
+    if (!item) return sendJSON(res, 404, { error: '这条评价不存在' });
+    if (!item.q) return sendJSON(res, 400, { error: '这条评价没有对应问题' });
+    recordGap(st, item.q, null);      // 已存在就自动重开，不会重复堆积
+    const gaps = ensureGaps(st);
+    const gap = gaps.find((g) => normGap(g.q) === normGap(item.q));
+    item.gapId = gap?.id || '';
+    saveState(id, st);
+    return sendJSON(res, 200, { gap: gap || null, gaps, stats: feedbackStats(list) });
   }
 
   /* --- 测试题 --- */
@@ -2558,7 +2866,7 @@ const server = http.createServer(async (req, res) => {
   // 局域网访问放开（同一个 WiFi 内的其他电脑可以打开）
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);

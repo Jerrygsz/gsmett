@@ -447,6 +447,11 @@
     async setGap(gid, patch) { return API.setGap(this.clientId, gid, patch); },
     async verifyGap(gid) { return API.verifyGap(this.clientId, gid); },
 
+    /* 答案反馈：服务端是唯一真相，不进 syncSoon 的回写 */
+    async answerFeedback() { return API.answerFeedback(this.clientId); },
+    async setAnswerFeedback(body) { return API.setAnswerFeedback(this.clientId, body); },
+    async feedbackToGap(aid) { return API.feedbackToGap(this.clientId, aid); },
+
     /* ---------------- 成员 ---------------- */
 
     async refreshMembers() {

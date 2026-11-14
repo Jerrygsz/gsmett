@@ -146,6 +146,11 @@
     editMember(id, mid, patch) { return this.patch(`/api/clients/${id}/members/${mid}`, patch); },
     removeMember(id, mid) { return this.del(`/api/clients/${id}/members/${mid}`); },
 
+    /* ---------- 每条回答的 👍 / 👎 ---------- */
+    answerFeedback(id) { return this.get(`/api/clients/${id}/answer-feedback`); },
+    setAnswerFeedback(id, body) { return this.post(`/api/clients/${id}/answer-feedback`, body); },
+    feedbackToGap(id, aid) { return this.post(`/api/clients/${id}/answer-feedback/${aid}/to-gap`, {}); },
+
     /* ---------- 工单（申请协助 / 预约诊断 / 开通申请） ---------- */
     tickets() { return this.get('/api/tickets'); },
     newTicket(t) { return this.post('/api/tickets', t); },
